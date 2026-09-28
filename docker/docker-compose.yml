@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # ── MySQL ──
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: jasmin_root_pw
+      MYSQL_DATABASE: jasmin_db
+      MYSQL_USER: jasminadmin
+      MYSQL_PASSWORD: jasmin_secure_pw
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../Web Panel/database/jasmin_db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "3306:3306"
+
+  # ── PHP Version ──
+  php:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.php
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      DB_HOST: db
+      DB_NAME: jasmin_db
+      DB_USER: jasminadmin
+      DB_PASS: jasmin_secure_pw
+      HANDSHAKE_SECRET: jasmin@123
+    ports:
+      - "8080:80"
+
+  # ── Python Version ──
+  python:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.python
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: mysql+pymysql://jasminadmin:jasmin_secure_pw@db/jasmin_db
+      SECRET_KEY: change_me_random_string
+      ADMIN_PASSWORD: ChangeMe!2024
+      HANDSHAKE_SECRET: jasmin@123
+    depends_on:
+      - db
+    ports:
+      - "5000:5000"
+
+volumes:
+  mysql_data:

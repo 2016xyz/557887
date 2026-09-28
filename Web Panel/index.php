@@ -1,28 +1,12 @@
 <?php
-
-session_start();
-if( isset($_SESSION['username']) ){
-	header("Location: dashboard.php");
+/**
+ * 首页 — 重定向到登录或面板
+ */
+require_once __DIR__ . '/includes/auth.php';
+if (session_status() === PHP_SESSION_NONE) session_start();
+if (isset($_SESSION['username'])) {
+    header('Location: dashboard.php');
+} else {
+    header('Location: login.php');
 }
-?>
-
-<!DOCTYPE html>
-<html lang="en" >
-<head>
-   <meta charset="UTF-8" http-equiv="refresh" content="3;url=login.php" />
-  <title>Jasmin Dashboard</title>
-  <link rel="stylesheet" href="./assets/css/loading.css">
-</head>
-<body>
-<div class="wrap">
-  <div class="bg">
-    <div class="loading">
-      <span class="title">loading.....</span>
-      <span class="text"> Jasmin Dashboard</span>
-    </div>
-  </div>
-</div>
-  <script src='http://cdnjs.cloudflare.com/ajax/libs/jquery/2.1.3/jquery.min.js'></script>
-
-</body>
-</html>
+exit;

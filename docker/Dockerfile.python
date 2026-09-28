@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY ./Web\ Panel\ Python/ /app/
+
+RUN pip install --no-cache-dir -r requirements.txt \
+    && mkdir -p /app/payloads
+
+ENV FLASK_APP=app.py
+ENV SECRET_KEY=change_me_in_production
+ENV ADMIN_PASSWORD=ChangeMe!2024
+ENV HANDSHAKE_SECRET=jasmin@123
+
+EXPOSE 5000
+
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]

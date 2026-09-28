@@ -1,50 +1,63 @@
 <?php
-
-session_start();
-if( isset($_SESSION['username']) ){
-	header("Location: ./assets/other/loading.php");
-}
+require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/csrf.php';
+require_guest();
 ?>
-
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Login Below</title>
-    <!--<link rel="stylesheet" type="text/css" href="assets/css/style.css">-->
-    <link rel="stylesheet" type="text/css" href="assets/css/customstyle.css">
-    <link href='http://fonts.googleapis.com/css?family=Comfortaa' rel='stylesheet' type='text/css'>
-	<link rel="stylesheet" href="./assets/css/style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jasmin — Login</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="./assets/css/login-new.css">
 </head>
 <body>
-
-
-<div class="background-wrap">
-  <div class="background"></div>
-</div>
-
-<form id="accesspanel" action="checklogin.php" method="post">
-  <h1 id="litheader">LOGIN</h1>
-  <div class="inset">
-    <p>
-      <input type="text" name="username" id="email" placeholder="Email address">
-    </p>
-    <p>
-      <input type="password" name="password" id="password" placeholder="Access code">
-    </p>
-    <div style="text-align: center;">
-      <div class="checkboxouter">
-        <input type="checkbox" name="rememberme" id="remember" value="Remember">
-        <label class="checkbox"></label>
-      </div>
-      <label for="remember">Remember me for 14 days</label>
+<div class="login-wrap">
+  <form id="accesspanel" action="checklogin.php" method="post">
+    <div class="logo"><i class="fas fa-skull-crossbones"></i></div>
+    <h1>JASMIN</h1>
+    <p class="subtitle">Ransomware Control Panel</p>
+    <div class="field">
+      <i class="fas fa-user"></i>
+      <input type="text" name="username" id="email" placeholder="Username" required autocomplete="username">
     </div>
-    <input class="loginLoginValue" type="hidden" name="service" value="login" />
-  </div>
-  <p class="p-container">
-    <input type="submit" name="Login" id="go" value="Authorize">
-  </p>
-</form>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
-<script src="assets/js/login.js?version=20190430v01"></script>
+    <div class="field">
+      <i class="fas fa-lock"></i>
+      <input type="password" name="password" id="password" placeholder="Password" required autocomplete="current-password">
+    </div>
+    <?=csrf_field()?>
+    <button type="submit" id="go">Authorize</button>
+    <p id="msg" class="msg"></p>
+  </form>
+</div>
+<script>
+document.getElementById('accesspanel').addEventListener('submit', function(e) {
+  e.preventDefault();
+  var btn = document.getElementById('go');
+  var msg = document.getElementById('msg');
+  btn.textContent = 'Verifying...';
+  btn.disabled = true;
+  msg.textContent = '';
+  fetch('checklogin.php', {method:'POST', body: new FormData(this)})
+    .then(r => r.text())
+    .then(data => {
+      if (data.trim() === 'success') {
+        window.location = 'dashboard.php';
+      } else {
+        msg.textContent = 'Access Denied';
+        msg.className = 'msg error';
+        btn.textContent = 'Authorize';
+        btn.disabled = false;
+      }
+    })
+    .catch(() => {
+      msg.textContent = 'Connection error';
+      msg.className = 'msg error';
+      btn.textContent = 'Authorize';
+      btn.disabled = false;
+    });
+});
+</script>
 </body>
 </html>

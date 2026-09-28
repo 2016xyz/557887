@@ -1,0 +1,17 @@
+RewriteEngine On
+
+# Block access to sensitive files
+<FilesMatch "\.(env|sql|tpl|md)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Block access to directories
+Options -Indexes
+
+# Block includes directory
+<IfModule mod_rewrite.c>
+    RewriteRule ^includes/ - [F,L]
+    RewriteRule ^database/ - [F,L]
+    RewriteRule ^templates/ - [F,L]
+</IfModule>

