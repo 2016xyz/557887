@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Jasmin — 安装引导</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#060a13;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.wrap{width:100%;max-width:520px;padding:20px}
+form{background:#0d1321;border:1px solid #1a2340;border-radius:16px;padding:36px 32px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.logo{font-size:2.2rem;color:#f43f5e;text-align:center;margin-bottom:6px}
+h1{font-size:1.3rem;letter-spacing:4px;color:#e2e8f0;text-align:center;margin-bottom:4px}
+.sub{color:#4a5568;font-size:.78rem;text-align:center;margin-bottom:20px}
+.steps{display:flex;gap:4px;margin-bottom:22px}
+.stp{flex:1;height:4px;border-radius:2px;background:#1e293b}
+.stp.done{background:#10b981}.stp.cur{background:#4dc3fa}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:.75rem;color:#94a3b8;margin-bottom:5px}
+.field input{width:100%;padding:10px 14px;background:#060a13;border:1px solid #1e293b;border-radius:8px;color:#e2e8f0;font-size:.88rem;outline:none}
+.field input:focus{border-color:#4dc3fa}
+.err{color:#f87171;font-size:.82rem;margin-bottom:12px;text-align:center}
+.chk{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1e293b;font-size:.85rem;color:#c8cdd8}
+.chk .ok{color:#10b981}.chk .fail{color:#ef4444}
+button{width:100%;padding:12px;background:linear-gradient(135deg,#f43f5e,#e11d48);border:none;border-radius:8px;color:#fff;font-size:.92rem;font-weight:600;cursor:pointer;margin-top:8px}
+button:hover{opacity:.9}
+h3{color:#e2e8f0;margin-bottom:14px;font-size:.95rem}
+.done-box{text-align:center;padding:20px 0}
+.done-box i{font-size:3rem;color:#10b981;display:block;margin-bottom:12px}
+.done-box a{color:#4dc3fa;text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+<form method="post" action="{{ url_for('install', step=step) }}">
+<div class="logo"><i class="fas fa-skull-crossbones"></i></div>
+<h1>JASMIN</h1>
+<p class="sub">安装引导 — 步骤 {{ step }}/4</p>
+<div class="steps">
+  <div class="stp {{ 'done' if step>1 else ('cur' if step==1 else '') }}"></div>
+  <div class="stp {{ 'done' if step>2 else ('cur' if step==2 else '') }}"></div>
+  <div class="stp {{ 'done' if step>3 else ('cur' if step==3 else '') }}"></div>
+  <div class="stp {{ 'done' if step>3 else '' }}"></div>
+</div>
+{% if error %}<div class="err"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>{% endif %}
+
+{% if step == 1 %}
+<h3>环境检测</h3>
+<div class="chk"><span>Python {{ import('sys').version.split()[0] if false else '3.x' }}</span><span class="ok"><i class="fas fa-check"></i></span></div>
+<div class="chk"><span>Flask</span><span class="ok"><i class="fas fa-check"></i></span></div>
+<div class="chk"><span>PyMySQL</span><span class="ok"><i class="fas fa-check"></i></span></div>
+<div class="chk"><span>SQLAlchemy</span><span class="ok"><i class="fas fa-check"></i></span></div>
+<a href="{{ url_for('install', step=2) }}"><button type="button">下一步 →</button></a>
+{% endif %}
+
+{% if step == 2 %}
+<h3>数据库配置 (MySQL)</h3>
+<div class="field"><label>主机</label><input name="db_host" value="localhost" required></div>
+<div class="field"><label>端口</label><input name="db_port" value="3306" required></div>
+<div class="field"><label>数据库名</label><input name="db_name" value="jasmin_db" required></div>
+<div class="field"><label>用户名</label><input name="db_user" required></div>
+<div class="field"><label>密码</label><input name="db_pass" type="password"></div>
+<div class="field"><label>握手密钥</label><input name="secret" value="jasmin@123" required></div>
+<button type="submit">测试连接并创建表 →</button>
+{% endif %}
+
+{% if step == 3 %}
+<h3>创建管理员</h3>
+<div class="field"><label>用户名</label><input name="admin_user" value="admin" required></div>
+<div class="field"><label>密码</label><input name="admin_pass" type="password" required></div>
+<div class="field"><label>确认密码</label><input name="admin_pass2" type="password" required></div>
+<button type="submit">完成安装 →</button>
+{% endif %}
+
+{% if step == 4 %}
+<div class="done-box">
+  <i class="fas fa-check-circle"></i>
+  <h3>安装完成!</h3>
+  <p style="color:#94a3b8;margin:12px 0">Jasmin C2 已成功部署</p>
+  <a href="{{ url_for('login') }}"><button type="button">进入登录页 →</button></a>
+</div>
+{% endif %}
+
+</form></div></body></html>

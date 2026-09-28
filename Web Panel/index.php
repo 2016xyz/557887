@@ -1,9 +1,12 @@
 <?php
 /**
- * 首页 — 重定向到登录或面板
+ * 首页 — 未安装跳安装引导，否则跳登录/面板
  */
-require_once __DIR__ . '/includes/auth.php';
-if (session_status() === PHP_SESSION_NONE) session_start();
+session_start();
+if (!file_exists(__DIR__ . '/.installed')) {
+    header('Location: install.php');
+    exit;
+}
 if (isset($_SESSION['username'])) {
     header('Location: dashboard.php');
 } else {
