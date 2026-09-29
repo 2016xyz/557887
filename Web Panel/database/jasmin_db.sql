@@ -15,10 +15,8 @@ CREATE TABLE IF NOT EXISTS `master` (
   UNIQUE KEY `admin` (`admin`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Default admin: username=admin, password=ChangeMe!2024
--- Generated via: php -r "echo password_hash('ChangeMe!2024', PASSWORD_BCRYPT);"
-INSERT INTO `master` (`id`, `admin`, `creds`) VALUES
-(1, 'admin', '$2y$10$8KzQ1X5YR5Z6X5Z6X5Z6XO1234567890123456789012345678901234');
+-- Default admin will be created via install wizard or setup.php
+-- Do not insert here as bcrypt hashes must be generated at runtime
 
 -- Victims table
 CREATE TABLE IF NOT EXISTS `victims` (
