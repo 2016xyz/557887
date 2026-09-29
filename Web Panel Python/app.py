@@ -32,9 +32,10 @@ app.config['HANDSHAKE_SECRET'] = cfg.get('handshake_secret', os.environ.get('HAN
 db = SQLAlchemy(app)
 
 class Admin(db.Model):
+    __tablename__ = 'master'
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(255), unique=True, nullable=False)
-    password = db.Column(db.String(255), nullable=False)
+    username = db.Column('admin', db.String(255), unique=True, nullable=False)
+    password = db.Column('creds', db.String(255), nullable=False)
 
 class Victim(db.Model):
     id = db.Column(db.Integer, primary_key=True)
