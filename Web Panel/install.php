@@ -142,7 +142,7 @@ foreach($checks as $name=>$ok): ?>
 
 <?php if($step === 2): ?>
 <h3 style="color:#e2e8f0;margin-bottom:14px">数据库配置</h3>
-<div class="field"><label>数据库主机</label><input name="db_host" value="localhost" required></div>
+<div class="field"><label>数据库主机</label><input name="db_host" value="<?=file_exists('/.dockerenv')?'db':'localhost'?>" required></div>
 <div class="field"><label>端口</label><input name="db_port" value="3306" required></div>
 <div class="field"><label>数据库名</label><input name="db_name" value="jasmin_db" required></div>
 <div class="field"><label>用户名</label><input name="db_user" value="" required></div>

@@ -55,7 +55,7 @@ h3{color:#e2e8f0;margin-bottom:14px;font-size:.95rem}
 
 {% if step == 2 %}
 <h3>数据库配置 (MySQL)</h3>
-<div class="field"><label>主机</label><input name="db_host" value="localhost" required></div>
+<div class="field"><label>主机</label><input name="db_host" value="{{ 'db' if env_docker else 'localhost' }}" required></div>
 <div class="field"><label>端口</label><input name="db_port" value="3306" required></div>
 <div class="field"><label>数据库名</label><input name="db_name" value="jasmin_db" required></div>
 <div class="field"><label>用户名</label><input name="db_user" required></div>

@@ -104,7 +104,8 @@ def install():
                 cfg['installed'] = True
                 json.dump(cfg, open(CONFIG_FILE,'w'))
                 return redirect(url_for('install', step=4))
-    return render_template('install.html', step=step, error=error)
+    return render_template('install.html', step=step, error=error,
+        env_docker=os.path.exists('/.dockerenv'))
 
 # ── Auth ──
 @app.route('/')
