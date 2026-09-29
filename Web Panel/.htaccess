@@ -6,6 +6,12 @@ RewriteEngine On
     Deny from all
 </FilesMatch>
 
+# Block plaintext private key and secret (only .pem.enc is public)
+<FilesMatch "^\.key_secret$|^jasmin_private\.pem$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
 # Block access to directories
 Options -Indexes
 

