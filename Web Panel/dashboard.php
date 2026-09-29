@@ -137,7 +137,7 @@ $csrf = csrf_token();
   var sec=document.createElement('section');
   sec.className='panel';sec.id='panel-update';sec.style.display='none';
   sec.innerHTML='<h2><i class="fas fa-cloud-download-alt"></i> 检查更新</h2>'
-    +'<p style="color:#94a3b8;margin-bottom:16px">当前版本: <b style="color:#4dc3fa">1.0.0</b></p>'
+    +'<p style="color:#94a3b8;margin-bottom:16px">当前版本: <b style="color:#4dc3fa"><?=trim(file_get_contents(__DIR__."/../VERSION")?:"0.0.0")?></b></p>'
     +'<button class="btn btn-red" onclick="checkUpdate()"><i class="fas fa-sync-alt"></i> 检查更新</button>'
     +'<div id="update-result" style="margin-top:16px"></div>';
   main.appendChild(sec);
@@ -147,8 +147,10 @@ function checkUpdate(){
   var r=document.getElementById('update-result');
   r.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在检查...</span>';
   fetch('update.php?action=check').then(x=>x.json()).then(d=>{
-    if(!d.ok||!d.update){r.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> 已是最新版本 ('+d.current+')</div>';return;}
-    var info='最新提交: <b>'+d.latest_commit+'</b> — '+d.message+'<br>时间: '+d.date;
+    if(!d.ok||!d.update){r.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> 已是最新版本 (v'+d.current+')</div>';return;}
+    var info='远程版本: <b>v'+d.latest+'</b>';
+    if(d.latest_commit)info+=' | 提交: '+d.latest_commit+' — '+d.message;
+    if(d.date)info+='<br>时间: '+d.date;
     r.innerHTML='<div class="gen-ok"><i class="fas fa-arrow-circle-up"></i> 发现新版本<br>'+info
       +'<br><br><button class="btn btn-red" onclick="doUpdate()"><i class="fas fa-download"></i> 一键更新</button></div>';
   }).catch(e=>{r.innerHTML='<div class="gen-err">检查失败: '+e+'</div>';});
