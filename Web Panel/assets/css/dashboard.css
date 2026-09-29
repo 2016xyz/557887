@@ -81,6 +81,23 @@ tbody tr:hover{background:rgba(77,195,250,.03)}
 .pagination a.disabled{opacity:.3;pointer-events:none}
 
 /* Responsive */
+
+/* Decrypt Tutorial */
+.decrypt-tabs{display:flex;gap:6px;margin-bottom:20px}
+.dt-btn{padding:8px 16px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--muted);cursor:pointer;font-size:.82rem;transition:all .15s}
+.dt-btn:hover{color:var(--text);border-color:var(--accent2)}
+.dt-btn.active{background:var(--accent2);color:var(--bg);border-color:var(--accent2)}
+.dt-btn i{margin-right:4px}
+.dt-content h3{color:#fff;font-size:1rem;margin-bottom:10px}
+.dt-desc{color:var(--muted);font-size:.82rem;margin-bottom:16px}
+.dt-step{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(26,35,64,.3);font-size:.85rem;color:var(--text)}
+.dt-step span{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0}
+.dt-step code{background:var(--surface2);padding:2px 8px;border-radius:4px;font-family:monospace;font-size:.82rem;color:var(--accent2)}
+.dt-note{margin-top:14px;padding:10px 14px;background:rgba(16,185,129,.06);border-left:3px solid var(--green);border-radius:0 8px 8px 0;font-size:.82rem;color:var(--green)}
+.dt-note i{margin-right:6px}
+.dt-code{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin:10px 0;font-family:monospace;font-size:.82rem;color:var(--accent2);overflow-x:auto;white-space:pre}
+
+/* Responsive */
 @media(max-width:768px){
   .sidebar{transform:translateX(-100%)}
   .sidebar.open{transform:translateX(0);box-shadow:4px 0 20px rgba(0,0,0,.5)}
