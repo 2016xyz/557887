@@ -14,6 +14,15 @@ chown www-data:www-data "$ENV_FILE"
 echo "[entrypoint] .env created"
 fi
 
+# Redis session (集群模式)
+if [ -n "$REDIS_HOST" ]; then
+cat > /usr/local/etc/php/conf.d/session-redis.ini << EOF
+session.save_handler = redis
+session.save_path = "tcp://${REDIS_HOST}:${REDIS_PORT:-6379}"
+EOF
+echo "[entrypoint] session -> redis://${REDIS_HOST}:${REDIS_PORT:-6379}"
+fi
+
 # Wait for DB schema + auto-create admin
 for i in $(seq 1 15); do
   if php /var/www/html/setup.php admin123 2>/dev/null; then

