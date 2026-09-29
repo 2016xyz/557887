@@ -47,6 +47,7 @@ class Admin(db.Model):
     password = db.Column('creds', db.String(255), nullable=False)
 
 class Victim(db.Model):
+    __tablename__ = 'victims'
     id = db.Column(db.Integer, primary_key=True)
     machine_name = db.Column(db.String(255))
     computer_user = db.Column(db.String(255))
