@@ -4,7 +4,16 @@ import os, secrets, json, datetime
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, flash
 from flask_sqlalchemy import SQLAlchemy
+import bcrypt as _bcrypt
 from werkzeug.security import generate_password_hash, check_password_hash
+
+def _verify_password(stored_hash, password):
+    """兼容PHP bcrypt ($2y$) 和 werkzeug hash"""
+    h = stored_hash
+    if h.startswith('$2y$') or h.startswith('$2b$') or h.startswith('$2a$'):
+        h = h.replace('$2y$','$2b$')
+        return _bcrypt.checkpw(password.encode('utf-8'), h.encode('utf-8'))
+    return check_password_hash(h, password)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
@@ -125,7 +134,7 @@ def login():
         u = request.form.get('username','')
         p = request.form.get('password','')
         admin = Admin.query.filter_by(username=u).first()
-        if admin and check_password_hash(admin.password.replace('$2y$','$2b$'), p):
+        if admin and _verify_password(admin.password, p):
             session['username'] = admin.username
             return redirect(url_for('dashboard'))
         flash('Access Denied','error')
