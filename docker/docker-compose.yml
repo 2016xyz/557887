@@ -10,6 +10,7 @@ services:
       MYSQL_PASSWORD: jasmin_secure_pw
     volumes:
       - mysql_data:/var/lib/mysql
+      - ../Web Panel/database/jasmin_db.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     ports:
       - "3306:3306"
     healthcheck:
@@ -33,6 +34,12 @@ services:
       - php_passwords:/var/www/html/passwords
     environment:
       GIT_TOKEN: ${GIT_TOKEN:-}
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: jasmin_db
+      DB_USER: jasminadmin
+      DB_PASS: jasmin_secure_pw
+      HANDSHAKE_SECRET: jasmin@123
     ports:
       - "8080:80"
 
@@ -49,6 +56,12 @@ services:
       - py_payloads:/app/payloads
     environment:
       GIT_TOKEN: ${GIT_TOKEN:-}
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: jasmin_db
+      DB_USER: jasminadmin
+      DB_PASS: jasmin_secure_pw
+      HANDSHAKE_SECRET: jasmin@123
     ports:
       - "5000:5000"
 

@@ -21,4 +21,8 @@ RUN rm -f /var/www/html/.installed /var/www/html/.env \
 # Pass GIT_TOKEN as Apache env
 RUN echo 'PassEnv GIT_TOKEN' >> /etc/apache2/conf-available/jasmin.conf
 
+COPY docker/entrypoint-php.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 EXPOSE 80
+ENTRYPOINT ["/entrypoint.sh"]
