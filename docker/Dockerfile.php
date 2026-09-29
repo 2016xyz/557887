@@ -10,6 +10,7 @@ RUN echo '<Directory /var/www/html>\n    AllowOverride All\n    Require all gran
     && a2enconf jasmin
 
 COPY ["Web Panel/", "/var/www/html/"]
+COPY ["VERSION", "/var/www/html/VERSION"]
 
 RUN rm -f /var/www/html/.installed /var/www/html/.env \
     && chown -R www-data:www-data /var/www/html \

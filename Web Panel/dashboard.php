@@ -137,7 +137,7 @@ $csrf = csrf_token();
   var sec=document.createElement('section');
   sec.className='panel';sec.id='panel-update';sec.style.display='none';
   sec.innerHTML='<h2><i class="fas fa-cloud-download-alt"></i> 检查更新</h2>'
-    +'<p style="color:#94a3b8;margin-bottom:16px">当前版本: <b style="color:#4dc3fa"><?=trim(file_get_contents(__DIR__."/../VERSION")?:"0.0.0")?></b></p>'
+    +'<p style="color:#94a3b8;margin-bottom:16px">当前版本: <b style="color:#4dc3fa"><?php $v=__DIR__."/../VERSION";if(!file_exists($v))$v=__DIR__."/VERSION";echo trim(@file_get_contents($v)?:"0.0.0");?></b></p>'
     +'<button class="btn btn-red" onclick="checkUpdate()"><i class="fas fa-sync-alt"></i> 检查更新</button>'
     +'<div id="update-result" style="margin-top:16px"></div>';
   main.appendChild(sec);

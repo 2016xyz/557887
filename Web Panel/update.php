@@ -6,7 +6,9 @@ require_once __DIR__ . '/includes/auth.php';
 require_auth();
 header('Content-Type: application/json');
 
-define('CURRENT_VERSION', trim(file_get_contents(__DIR__ . '/../VERSION') ?: '0.0.0'));
+$vf = __DIR__ . '/../VERSION';
+if (!file_exists($vf)) $vf = __DIR__ . '/VERSION';
+define('CURRENT_VERSION', trim(@file_get_contents($vf) ?: '0.0.0'));
 define('REPO', '2016xyz/Jasmin-Ransomware-Private');
 define('GIT_TOKEN', trim(getenv('GIT_TOKEN') ?: ($_ENV['GIT_TOKEN'] ?? '')));
 
