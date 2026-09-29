@@ -31,6 +31,8 @@ services:
     volumes:
       - php_payloads:/var/www/html/payloads
       - php_passwords:/var/www/html/passwords
+    environment:
+      GIT_TOKEN: ${GIT_TOKEN:-}
     ports:
       - "8080:80"
 
@@ -45,6 +47,8 @@ services:
         condition: service_healthy
     volumes:
       - py_payloads:/app/payloads
+    environment:
+      GIT_TOKEN: ${GIT_TOKEN:-}
     ports:
       - "5000:5000"
 

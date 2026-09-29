@@ -4,6 +4,10 @@
 
 ```bash
 cd docker
+
+# 设置GitHub Token（私有仓库检查更新需要）
+export GIT_TOKEN=ghp_your_token_here
+
 docker-compose up -d
 ```
 

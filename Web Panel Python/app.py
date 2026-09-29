@@ -199,8 +199,11 @@ CURRENT_VERSION = '1.0.0'
 @login_required
 def check_update():
     import urllib.request
+    token = os.environ.get('GIT_TOKEN','')
     url = 'https://api.github.com/repos/2016xyz/Jasmin-Ransomware-Private/commits?per_page=1'
     req = urllib.request.Request(url, headers={'User-Agent':'Jasmin-C2'})
+    if token:
+        req.add_header('Authorization', f'token {token}')
     try:
         resp = urllib.request.urlopen(req, timeout=10)
         data = json.loads(resp.read())

@@ -8,7 +8,7 @@ header('Content-Type: application/json');
 
 define('CURRENT_VERSION', '1.0.0');
 define('REPO', '2016xyz/Jasmin-Ransomware-Private');
-define('GIT_TOKEN', '');
+define('GIT_TOKEN', trim($_ENV['GIT_TOKEN'] ?? ''));
 
 $action = $_GET['action'] ?? 'check';
 if ($action === 'check') check_update();
