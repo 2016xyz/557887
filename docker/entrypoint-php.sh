@@ -15,6 +15,6 @@ echo "[entrypoint] .env created"
 fi
 
 # Auto-create default admin if master table is empty
-php /var/www/html/setup.php admin admin123 2>/dev/null && echo "[entrypoint] admin checked"
+php /var/www/html/setup.php admin123 2>/dev/null && echo "[entrypoint] admin checked"
 
 exec apache2-foreground
