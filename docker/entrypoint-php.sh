@@ -14,11 +14,14 @@ chown www-data:www-data "$ENV_FILE"
 echo "[entrypoint] .env created"
 fi
 
-# Wait for DB and auto-create default admin
-for i in $(seq 1 10); do
-  php /var/www/html/setup.php admin123 2>/dev/null && echo "[entrypoint] admin checked" && break
-  echo "[entrypoint] DB not ready, retry $i/10..."
-  sleep 2
+# Wait for DB schema + auto-create admin
+for i in $(seq 1 15); do
+  if php /var/www/html/setup.php admin123 2>/dev/null; then
+    echo "[entrypoint] admin ready"
+    break
+  fi
+  echo "[entrypoint] waiting for DB ($i/15)..."
+  sleep 3
 done
 
 exec apache2-foreground

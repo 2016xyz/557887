@@ -39,5 +39,6 @@ try {
     );
 } catch (PDOException $e) {
     error_log('Database connection failed: ' . $e->getMessage());
+    if (php_sapi_name() === 'cli') { echo "Database connection error.\n"; exit(1); }
     die('Database connection error.');
 }
