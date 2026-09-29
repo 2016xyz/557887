@@ -211,6 +211,16 @@ def check_update():
     except Exception:
         return jsonify(ok=True, current=CURRENT_VERSION, latest=CURRENT_VERSION, update=False, msg='无法连接更新服务器')
 
+@app.route('/do_update', methods=['POST'])
+@login_required
+def do_update():
+    import subprocess
+    root = os.path.dirname(os.path.dirname(__file__))
+    if os.path.isdir(os.path.join(root, '.git')):
+        r = subprocess.run(['git', 'pull'], cwd=root, capture_output=True, text=True, timeout=30)
+        return jsonify(ok=True, method='git', output=r.stdout + r.stderr)
+    return jsonify(ok=False, msg='无.git目录，请手动更新')
+
 # ── Startup ──
 if __name__ == '__main__':
     if is_installed():

