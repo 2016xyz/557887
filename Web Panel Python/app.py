@@ -205,7 +205,6 @@ def generate():
     return jsonify(ok=True, file=name, platform=plat, size=os.path.getsize(os.path.join(PAYLOAD_DIR,name)))
 
 @app.route('/payloads/<path:filename>')
-@login_required
 def download_payload(filename):
     return send_from_directory(PAYLOAD_DIR, filename, as_attachment=True)
 
