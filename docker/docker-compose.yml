@@ -12,13 +12,14 @@ services:
       MYSQL_PASSWORD: jasmin_secure_pw
     volumes:
       - mysql_data:/var/lib/mysql
-      - ../Web Panel/database/jasmin_db.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "3306:3306"
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 5s
+      timeout: 5s
       retries: 10
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4
 
   # ── PHP Version ──
   php:
@@ -27,13 +28,11 @@ services:
       dockerfile: docker/Dockerfile.php
     restart: unless-stopped
     depends_on:
-      - db
-    environment:
-      DB_HOST: db
-      DB_NAME: jasmin_db
-      DB_USER: jasminadmin
-      DB_PASS: jasmin_secure_pw
-      HANDSHAKE_SECRET: jasmin@123
+      db:
+        condition: service_healthy
+    volumes:
+      - php_payloads:/var/www/html/payloads
+      - php_passwords:/var/www/html/passwords
     ports:
       - "8080:80"
 
@@ -43,15 +42,16 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.python
     restart: unless-stopped
-    environment:
-      DATABASE_URL: mysql+pymysql://jasminadmin:jasmin_secure_pw@db/jasmin_db
-      SECRET_KEY: change_me_random_string
-      ADMIN_PASSWORD: ChangeMe!2024
-      HANDSHAKE_SECRET: jasmin@123
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+    volumes:
+      - py_payloads:/app/payloads
     ports:
       - "5000:5000"
 
 volumes:
   mysql_data:
+  php_payloads:
+  php_passwords:
+  py_payloads:
