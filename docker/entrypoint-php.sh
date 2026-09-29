@@ -14,7 +14,11 @@ chown www-data:www-data "$ENV_FILE"
 echo "[entrypoint] .env created"
 fi
 
-# Auto-create default admin if master table is empty
-php /var/www/html/setup.php admin123 2>/dev/null && echo "[entrypoint] admin checked"
+# Wait for DB and auto-create default admin
+for i in $(seq 1 10); do
+  php /var/www/html/setup.php admin123 2>/dev/null && echo "[entrypoint] admin checked" && break
+  echo "[entrypoint] DB not ready, retry $i/10..."
+  sleep 2
+done
 
 exec apache2-foreground
