@@ -1,6 +1,6 @@
 FROM php:8.2-apache
 
-RUN apt-get update && apt-get install -y --no-install-recommends git unzip \
+RUN apt-get update && apt-get install -y --no-install-recommends git unzip rsync \
     && rm -rf /var/lib/apt/lists/* \
     && docker-php-ext-install pdo pdo_mysql \
     && a2enmod rewrite \

