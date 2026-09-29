@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS `victims` (
   `encrypted_count` int(11) NOT NULL DEFAULT 0,
   `encrypted_size` bigint(20) NOT NULL DEFAULT 0,
   `encrypted_types` text DEFAULT NULL,
+  `encrypted_detail` text DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   INDEX `idx_systemid` (`systemid`),
