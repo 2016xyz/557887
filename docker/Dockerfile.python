@@ -4,12 +4,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     default-libmysqlclient-dev gcc && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY ./Web\ Panel\ Python/ /app/
+COPY ["Web Panel Python/", "/app/"]
 
 RUN pip install --no-cache-dir -r requirements.txt \
     && mkdir -p /app/payloads /app/templates/payloads
 
-# Remove config.json to force install wizard on first run
 RUN rm -f /app/config.json
 
 ENV FLASK_APP=app.py
