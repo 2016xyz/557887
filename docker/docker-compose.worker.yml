@@ -1,0 +1,77 @@
+# Jasmin C2 — 工作节点 (连接远程共享MySQL + Redis)
+# 多台服务器部署此文件，共享同一个数据库
+#
+# 用法:
+#   1. 创建 .env 文件配置远程DB和Redis地址
+#   2. docker compose -f docker-compose.worker.yml up -d --build --scale php=2 --scale python=2
+#
+# .env 示例:
+#   DB_HOST=10.0.1.100
+#   DB_PORT=3306
+#   DB_NAME=jasmin_db
+#   DB_USER=jasminadmin
+#   DB_PASS=jasmin_secure_pw
+#   REDIS_HOST=10.0.1.100
+#   REDIS_PORT=6379
+#   HANDSHAKE_SECRET=jasmin@123
+
+services:
+  # ── Nginx 负载均衡 ──
+  nginx:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.nginx
+    restart: unless-stopped
+    depends_on:
+      - php
+      - python
+    ports:
+      - "${LISTEN_PHP:-8080}:8080"
+      - "${LISTEN_PY:-5000}:5000"
+
+  # ── PHP 后台 ──
+  php:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.php
+    restart: unless-stopped
+    volumes:
+      - shared_payloads:/var/www/html/payloads
+      - shared_passwords:/var/www/html/passwords
+    environment:
+      GIT_TOKEN: ${GIT_TOKEN:-}
+      DB_HOST: ${DB_HOST:?请设置DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${DB_NAME:-jasmin_db}
+      DB_USER: ${DB_USER:-jasminadmin}
+      DB_PASS: ${DB_PASS:?请设置DB_PASS}
+      HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
+      REDIS_HOST: ${REDIS_HOST:-}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+    deploy:
+      replicas: ${PHP_REPLICAS:-2}
+
+  # ── Python 后台 ──
+  python:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.python
+    restart: unless-stopped
+    volumes:
+      - shared_payloads:/app/payloads
+    environment:
+      GIT_TOKEN: ${GIT_TOKEN:-}
+      DB_HOST: ${DB_HOST:?请设置DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${DB_NAME:-jasmin_db}
+      DB_USER: ${DB_USER:-jasminadmin}
+      DB_PASS: ${DB_PASS:?请设置DB_PASS}
+      HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
+      REDIS_HOST: ${REDIS_HOST:-}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+    deploy:
+      replicas: ${PY_REPLICAS:-2}
+
+volumes:
+  shared_payloads:
+  shared_passwords:
