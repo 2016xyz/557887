@@ -243,6 +243,22 @@ def check_update():
     return jsonify(ok=True, update=has_update, current=CURRENT_VERSION,
         latest=remote_ver or CURRENT_VERSION, latest_commit=sha, date=date, message=msg)
 
+# ── KeyGen ──
+@app.route('/keygen', methods=['POST'])
+@login_required
+def keygen():
+    from cryptography.hazmat.primitives.asymmetric import rsa as rsa_gen
+    from cryptography.hazmat.primitives import serialization as ser
+    from cryptography.hazmat.backends import default_backend
+    key = rsa_gen.generate_private_key(65537, 2048, default_backend())
+    priv = key.private_bytes(ser.Encoding.PEM, ser.PrivateFormat.TraditionalOpenSSL, ser.NoEncryption())
+    pub = key.public_key().public_bytes(ser.Encoding.PEM, ser.PublicFormat.SubjectPublicKeyInfo)
+    priv_path = os.path.join(PAYLOAD_DIR, 'jasmin_private.pem')
+    pub_path = os.path.join(PAYLOAD_DIR, 'jasmin_public.pem')
+    open(priv_path, 'wb').write(priv)
+    open(pub_path, 'wb').write(pub)
+    return jsonify(ok=True, pub=pub.decode(), msg='密钥对已生成并保存到 payloads/ 目录')
+
 @app.route('/do_update', methods=['POST'])
 @login_required
 def do_update():
