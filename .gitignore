@@ -3,10 +3,15 @@
 __pycache__/
 instance/
 *.db
-payloads/
-passwords/
 *.suo
 *.user
 obj/
 bin/
 .vs/
+config.json
+.installed
+
+# 只忽略生成的载荷输出目录，不忽略模板里的payloads
+/Web Panel/payloads/
+/Web Panel Python/payloads/
+/passwords/
