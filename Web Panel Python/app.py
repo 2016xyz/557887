@@ -124,7 +124,7 @@ def login():
         u = request.form.get('username','')
         p = request.form.get('password','')
         admin = Admin.query.filter_by(username=u).first()
-        if admin and check_password_hash(admin.password, p):
+        if admin and check_password_hash(admin.password.replace('$2y$','$2b$'), p):
             session['username'] = admin.username
             return redirect(url_for('dashboard'))
         flash('Access Denied','error')
