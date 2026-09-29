@@ -19,12 +19,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($step === 2) {
         // 测试数据库连接
         $host = trim($_POST['db_host'] ?? 'localhost');
+        $port = trim($_POST['db_port'] ?? '3306');
         $name = trim($_POST['db_name'] ?? 'jasmin_db');
         $user = trim($_POST['db_user'] ?? '');
         $pass = $_POST['db_pass'] ?? '';
         $secret = trim($_POST['secret'] ?? 'jasmin@123');
         try {
-            $pdo = new PDO("mysql:host={$host}", $user, $pass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+            $dsn = "mysql:host={$host};port={$port};charset=utf8mb4";
+            $pdo = new PDO($dsn, $user, $pass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
             $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$name}` DEFAULT CHARACTER SET utf8mb4");
             $pdo->exec("USE `{$name}`");
             // 建表
@@ -48,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 INDEX(`systemid`), INDEX(`ip`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             // 写.env
-            $env = "DB_HOST={$host}\nDB_NAME={$name}\nDB_USER={$user}\nDB_PASS={$pass}\nHANDSHAKE_SECRET={$secret}\n";
+            $env = "DB_HOST={$host}\nDB_PORT={$port}\nDB_NAME={$name}\nDB_USER={$user}\nDB_PASS={$pass}\nHANDSHAKE_SECRET={$secret}\n";
             file_put_contents(__DIR__ . '/.env', $env);
             $_SESSION['install_db_ok'] = true;
             header('Location: install.php?step=3');
@@ -141,6 +143,7 @@ foreach($checks as $name=>$ok): ?>
 <?php if($step === 2): ?>
 <h3 style="color:#e2e8f0;margin-bottom:14px">数据库配置</h3>
 <div class="field"><label>数据库主机</label><input name="db_host" value="localhost" required></div>
+<div class="field"><label>端口</label><input name="db_port" value="3306" required></div>
 <div class="field"><label>数据库名</label><input name="db_name" value="jasmin_db" required></div>
 <div class="field"><label>用户名</label><input name="db_user" value="" required></div>
 <div class="field"><label>密码</label><input name="db_pass" type="password" value=""></div>
