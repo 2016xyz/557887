@@ -3,9 +3,32 @@
 import os,sys,subprocess
 def _dep():
     try:
-        import cryptography
-    except ImportError:
-        subprocess.check_call([sys.executable,'-m','pip','install','-q','cryptography'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        import cryptography; return
+    except ImportError: pass
+    try:
+        subprocess.run([sys.executable,'-m','ensurepip','--default-pip'],capture_output=True)
+    except: pass
+    for cmd in [
+        [sys.executable,'-m','pip','install','-q','--user','cryptography'],
+        [sys.executable,'-m','pip','install','-q','cryptography'],
+        ['pip3','install','-q','--user','cryptography'],
+        ['pip3','install','-q','cryptography'],
+    ]:
+        try:
+            r=subprocess.run(cmd,capture_output=True,timeout=120)
+            if r.returncode==0:
+                import cryptography; return
+        except: continue
+    try:
+        import urllib.request,tempfile
+        gp=os.path.join(tempfile.gettempdir(),'get-pip.py')
+        urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py',gp)
+        subprocess.run([sys.executable,gp,'--user','-q'],capture_output=True,timeout=120)
+        subprocess.run([sys.executable,'-m','pip','install','-q','--user','cryptography'],capture_output=True,timeout=120)
+        os.remove(gp)
+        import cryptography; return
+    except: pass
+    print('[!] 无法自动安装cryptography，请手动: pip3 install cryptography'); sys.exit(1)
 _dep()
 import struct,hashlib,socket,platform,datetime,urllib.request,json
 from cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes
