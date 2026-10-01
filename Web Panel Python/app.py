@@ -16,7 +16,6 @@ def _verify_password(stored_hash, password):
     return check_password_hash(h, password)
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
 PAYLOAD_DIR = os.path.join(os.path.dirname(__file__), 'payloads')
@@ -33,6 +32,15 @@ def is_installed():
     return cfg.get('installed', False)
 
 cfg = load_config()
+# SECRET_KEY持久化: 优先环境变量 > config.json > 生成并保存
+_sk = os.environ.get('SECRET_KEY') or cfg.get('secret_key')
+if not _sk:
+    _sk = secrets.token_hex(32)
+    cfg['secret_key'] = _sk
+    try:
+        json.dump(cfg, open(CONFIG_FILE,'w'))
+    except: pass
+app.secret_key = _sk
 db_url = cfg.get('database_url', os.environ.get('DATABASE_URL', 'sqlite:///jasmin.db'))
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -144,12 +152,26 @@ def login():
     if not is_installed(): return redirect(url_for('install'))
     if 'username' in session: return redirect(url_for('dashboard'))
     if request.method == 'POST':
+        ip = request.remote_addr or 'unknown'
+        fail_key = f'fail_{ip}'
+        fail_time_key = f'fail_t_{ip}'
+        fail_count = session.get(fail_key, 0)
+        fail_time = session.get(fail_time_key, 0)
+        import time as _time
+        if _time.time() - fail_time > 300:
+            fail_count = 0
+        if fail_count >= 10:
+            flash('登录尝试过多，请5分钟后再试', 'error')
+            return render_template('login.html')
         u = request.form.get('username','')
         p = request.form.get('password','')
         admin = Admin.query.filter_by(username=u).first()
         if admin and _verify_password(admin.password, p):
+            session.pop(fail_key, None); session.pop(fail_time_key, None)
             session['username'] = admin.username
             return redirect(url_for('dashboard'))
+        session[fail_key] = fail_count + 1
+        session[fail_time_key] = fail_time if fail_count > 0 else int(_time.time())
         flash('Access Denied','error')
     return render_template('login.html')
 

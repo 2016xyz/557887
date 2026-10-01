@@ -27,6 +27,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $dsn = "mysql:host={$host};port={$port};charset=utf8mb4";
             $pdo = new PDO($dsn, $user, $pass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+            // 白名单验证DB名，防止SQL注入
+            if (!preg_match('/^[a-zA-Z0-9_]+$/', $name)) {
+                $error = '数据库名只能包含字母、数字、下划线'; break;
+            }
             $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$name}` DEFAULT CHARACTER SET utf8mb4");
             $pdo->exec("USE `{$name}`");
             // 建表
@@ -46,6 +50,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 `location` varchar(255),
                 `systemid` varchar(255),
                 `password` varchar(255),
+                `encrypted_count` int NOT NULL DEFAULT 0,
+                `encrypted_size` bigint NOT NULL DEFAULT 0,
+                `encrypted_types` text DEFAULT NULL,
+                `encrypted_detail` text DEFAULT NULL,
                 `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
                 INDEX(`systemid`), INDEX(`ip`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");

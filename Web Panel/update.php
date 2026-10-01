@@ -13,9 +13,21 @@ define('REPO', '2016xyz/Jasmin-Ransomware-Private');
 define('GIT_TOKEN', trim(getenv('GIT_TOKEN') ?: ($_ENV['GIT_TOKEN'] ?? '')));
 
 $action = $_GET['action'] ?? 'check';
-if ($action === 'check') check_update();
-elseif ($action === 'update') do_update();
-else echo json_encode(['ok'=>false,'msg'=>'无效操作']);
+if ($action === 'check') {
+    check_update();
+} elseif ($action === 'update') {
+    // 更新操作需要POST+CSRF
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        echo json_encode(['ok'=>false,'msg'=>'必须使用POST方法']); exit;
+    }
+    require_once __DIR__ . '/includes/csrf.php';
+    if (!csrf_verify()) {
+        echo json_encode(['ok'=>false,'msg'=>'CSRF验证失败']); exit;
+    }
+    do_update();
+} else {
+    echo json_encode(['ok'=>false,'msg'=>'无效操作']);
+}
 
 function gh_get($url) {
     $h = "User-Agent: Jasmin-C2\r\n";

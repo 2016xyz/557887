@@ -37,5 +37,6 @@ CREATE TABLE IF NOT EXISTS `victims` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   INDEX `idx_systemid` (`systemid`),
-  INDEX `idx_ip` (`ip`)
+  INDEX `idx_ip` (`ip`),
+  UNIQUE KEY `uniq_systemid` (`systemid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
