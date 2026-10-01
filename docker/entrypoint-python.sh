@@ -19,7 +19,7 @@ fi
 # 解密工具：镜像烘焙在 /opt/jasmin-tools，运行时补进 shared_payloads 卷内
 # (payloads/ 是 volume，镜像里 COPY 进去会被卷挂载覆盖)
 if [ -d /opt/jasmin-tools ]; then
-  for f in jasmin_decrypt_openssl.sh jasmin_decrypt.py jasmin_diagnose.sh; do
+  for f in jasmin_decrypt_openssl.sh jasmin_decrypt.py jasmin_diagnose.sh jasmin_unlock.sh; do
     if [ -f "/opt/jasmin-tools/$f" ]; then
       cp -f "/opt/jasmin-tools/$f" "/app/payloads/$f"
       chmod 0644 "/app/payloads/$f" 2>/dev/null || true

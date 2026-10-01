@@ -34,9 +34,11 @@ $dir = __DIR__ . '/payloads';
 if (!is_dir($dir)) mkdir($dir, 0750, true);
 
 // AES-256-CBC 加密私钥
-$aes_key = bin2hex(random_bytes(16)); // 32 hex chars = 256 bit
+$aes_key = bin2hex(random_bytes(16)); // 32 hex chars = 128 bit
 $iv = random_bytes(16);
-$encrypted_priv = openssl_encrypt($priv, 'aes-256-cbc', $aes_key, OPENSSL_RAW_DATA, $iv);
+// 必须与 Python 端 keygen 完全一致（AES-128-CBC，密钥=hex解码后的16字节），
+// 否则两端生成的密钥互不兼容，解密命令只能打开其中一种。
+$encrypted_priv = openssl_encrypt($priv, 'aes-128-cbc', hex2bin($aes_key), OPENSSL_RAW_DATA, $iv);
 $enc_blob = base64_encode($iv . $encrypted_priv);
 
 // 保存: 加密私钥(公开下载) + 明文私钥(仅后台) + 公钥 + 密码

