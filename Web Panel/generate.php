@@ -8,6 +8,7 @@ require_auth();
 header('Content-Type: application/json');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { echo json_encode(['ok'=>false,'msg'=>'POST only']); exit; }
+if (!csrf_verify()) { http_response_code(403); echo json_encode(['ok'=>false,'msg'=>'CSRF 校验失败，请刷新页面重试']); exit; }
 
 $platform = $_POST['platform'] ?? '';
 $c2_url   = trim($_POST['c2_url'] ?? '');

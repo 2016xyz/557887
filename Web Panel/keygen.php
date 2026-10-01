@@ -3,8 +3,22 @@
  * RSA密钥对生成API — 私钥AES加密存储
  */
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/csrf.php';
 require_auth();
 header('Content-Type: application/json');
+
+// 仅接受 POST + 有效 CSRF：防止 <img src="keygen.php"> 触发的 GET 型 CSRF
+// 一旦密钥对被重建，所有已加密的受害者数据将永久无法解密
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['ok' => false, 'msg' => '仅支持 POST']);
+    exit;
+}
+if (!csrf_verify()) {
+    http_response_code(403);
+    echo json_encode(['ok' => false, 'msg' => 'CSRF 校验失败，请刷新页面重试']);
+    exit;
+}
 
 $bits = 2048;
 $config = ['private_key_bits' => $bits, 'private_key_type' => OPENSSL_KEYTYPE_RSA];
