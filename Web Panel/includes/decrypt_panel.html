@@ -1,7 +1,9 @@
 <?php
 $srv = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http').'://'.$_SERVER['HTTP_HOST'];
-$ks_path = __DIR__ . '/payloads/.key_secret';
-$aes_pwd = file_exists($ks_path) ? trim(file_get_contents($ks_path)) : 'KEY_NOT_SET';
+// 修复: __DIR__ 是 includes/，原写 __DIR__.'/payloads/.key_secret' 永远不存在
+//       → $aes_pwd 恒为 KEY_NOT_SET → 解密命令必然失败。应为上一级目录。
+$ks_path = dirname(__DIR__) . '/payloads/.key_secret';
+$aes_pwd = is_file($ks_path) ? trim(file_get_contents($ks_path)) : 'KEY_NOT_SET';
 ?>
 <section class="panel" id="panel-decrypt" style="display:none">
 <h2><i class="fas fa-unlock-alt"></i> 解密教程</h2>

