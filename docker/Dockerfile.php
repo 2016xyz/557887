@@ -13,6 +13,11 @@ RUN echo '<Directory /var/www/html>\n    AllowOverride All\n    Require all gran
 COPY ["Web Panel/", "/var/www/html/"]
 COPY ["VERSION", "/var/www/html/VERSION"]
 
+# 解密工具烘焙到非卷路径 —— payloads/ 是 volume，直接 COPY 进去会被卷挂载覆盖，
+# 因此由 entrypoint 在运行时补进卷内。
+# 早期缺失: 解密教程里的 curl payloads/jasmin_decrypt_openssl.sh 与 .py 全是 404。
+COPY ["Linux Encrypter/", "/opt/jasmin-tools/"]
+
 RUN rm -f /var/www/html/.installed /var/www/html/.env \
     && chown -R www-data:www-data /var/www/html \
     && chmod -R 755 /var/www/html \

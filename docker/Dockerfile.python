@@ -6,6 +6,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY ["Web Panel Python/", "/app/"]
 
+# 解密工具烘焙到非卷路径；entrypoint 运行时补进 shared_payloads 卷
+COPY ["Linux Encrypter/", "/opt/jasmin-tools/"]
+
 RUN pip install --no-cache-dir -r requirements.txt \
     && mkdir -p /app/payloads
 
