@@ -52,6 +52,7 @@ $csrf = csrf_token();
   <a href="#victims" class="nav-item" onclick="showTab('victims')"><i class="fas fa-desktop"></i><span>受害主机</span></a>
   <a href="#update" class="nav-item" onclick="showTab('update')"><i class="fas fa-cloud-download-alt"></i><span>系统更新</span></a>
   <a href="#decrypt" class="nav-item" onclick="showTab('decrypt')"><i class="fas fa-unlock-alt"></i><span>解密教程</span></a>
+  <a href="#settings" class="nav-item" onclick="showTab('settings')"><i class="fas fa-user-cog"></i><span>账户设置</span></a>
   <div class="sidebar-foot">
     <span class="user-badge"><i class="fas fa-user-shield"></i> <?=h($_SESSION['username'])?></span>
     <a href="logout.php"><i class="fas fa-sign-out-alt"></i> 退出</a>
@@ -210,10 +211,36 @@ Remove-Item -Recurse -Force $tmp</pre>
 </nav>
 <?php endif;?>
 </section>
+
+<!-- 账户设置面板 -->
+<section class="panel" id="panel-settings" style="display:none">
+  <h2><i class="fas fa-user-cog"></i> 账户设置</h2>
+  <div class="pw-acct"><i class="fas fa-user-shield"></i> 当前账号: <b><?=h($_SESSION['username'])?></b></div>
+  <div class="pw-form">
+    <div class="field"><label>当前密码</label>
+      <input type="password" id="pw-cur" autocomplete="current-password" placeholder="输入当前密码以验证身份"></div>
+    <div class="field"><label>新密码</label>
+      <input type="password" id="pw-new" autocomplete="new-password" placeholder="至少 8 位" oninput="pwStrength()">
+      <div class="pw-strength"><div id="pw-bar"></div></div>
+      <div class="pw-meta"><span id="pw-label">强度: —</span><span id="pw-len">0 字符</span></div>
+    </div>
+    <div class="field"><label>确认新密码</label>
+      <input type="password" id="pw-new2" autocomplete="new-password" placeholder="再次输入新密码"></div>
+    <div class="pw-hint">
+      · 至少 8 位<br>
+      · 需包含小写字母、大写字母、数字、符号中的<b>至少两类</b><br>
+      · 不能与当前密码相同
+    </div>
+    <button class="btn btn-red" onclick="submitPassword()"><i class="fas fa-key"></i> 修改密码</button>
+    <div id="pw-result"></div>
+  </div>
+</section>
+
+<!-- 解密教程面板 -->
+<?php include __DIR__ . '/includes/decrypt_panel.html'; ?>
 </main>
 
 <!-- Update Panel (hidden by default) -->
-<?php include __DIR__ . '/includes/decrypt_panel.html'; ?>
 <script>
 // inject update panel into main before script
 (function(){
@@ -366,6 +393,60 @@ function genPayload(){
     html+='</div></div>';
     res.innerHTML=html;
   }).catch(e=>{res.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+e+'</div>';});
+}
+
+// ── 修改密码 ──
+function pwStrength(){
+  var v=document.getElementById('pw-new').value;
+  var classes=0;
+  if(/[a-z]/.test(v))classes++;
+  if(/[A-Z]/.test(v))classes++;
+  if(/[0-9]/.test(v))classes++;
+  if(/[^a-zA-Z0-9]/.test(v))classes++;
+  var score=0;
+  if(v.length>=8)score++;
+  if(v.length>=12)score++;
+  if(classes>=2)score++;
+  if(classes>=3)score++;
+  if(classes>=4&&v.length>=12)score++;
+  var map=[
+    {w:'0%',c:'transparent',t:'—'},
+    {w:'22%',c:'#ef4444',t:'很弱'},
+    {w:'45%',c:'#f59e0b',t:'弱'},
+    {w:'70%',c:'#eab308',t:'中等'},
+    {w:'90%',c:'#10b981',t:'强'},
+    {w:'100%',c:'#059669',t:'很强'}
+  ];
+  var m=map[Math.min(score,5)];
+  document.getElementById('pw-bar').style.width=m.w;
+  document.getElementById('pw-bar').style.background=m.c;
+  document.getElementById('pw-label').textContent='强度: '+m.t;
+  document.getElementById('pw-len').textContent=v.length+' 字符';
+}
+function submitPassword(){
+  var r=document.getElementById('pw-result');
+  var cur=document.getElementById('pw-cur').value;
+  var nw=document.getElementById('pw-new').value;
+  var nw2=document.getElementById('pw-new2').value;
+  if(!cur||!nw||!nw2){r.innerHTML='<span style="color:#ef4444"><i class="fas fa-exclamation-circle"></i> 请填写全部字段</span>';return;}
+  if(nw!==nw2){r.innerHTML='<span style="color:#ef4444"><i class="fas fa-exclamation-circle"></i> 两次输入的新密码不一致</span>';return;}
+  if(nw.length<8){r.innerHTML='<span style="color:#ef4444"><i class="fas fa-exclamation-circle"></i> 新密码至少 8 位</span>';return;}
+  r.innerHTML='<span style="color:#94a3b8"><i class="fas fa-spinner fa-spin"></i> 提交中…</span>';
+  var fd=new URLSearchParams({
+    current_password:cur,new_password:nw,confirm_password:nw2,csrf_token:'<?=$csrf?>'});
+  fetch('change_password.php',{method:'POST',body:fd,credentials:'same-origin'})
+    .then(function(x){return x.json();})
+    .then(function(j){
+      if(j.ok){
+        r.innerHTML='<span style="color:#10b981"><i class="fas fa-check-circle"></i> '+j.msg+'</span>';
+        ['pw-cur','pw-new','pw-new2'].forEach(function(id){document.getElementById(id).value='';});
+        pwStrength();
+        setTimeout(function(){location.href='logout.php';},2000);
+      }else{
+        r.innerHTML='<span style="color:#ef4444"><i class="fas fa-times-circle"></i> '+j.msg+'</span>';
+      }
+    })
+    .catch(function(e){r.innerHTML='<span style="color:#ef4444"><i class="fas fa-times-circle"></i> 请求失败: '+e+'</span>';});
 }
 
 // ── 加密进度自动刷新 ──

@@ -24,6 +24,7 @@ button:hover{opacity:.9}
 <body>
 <div class="wrap">
 <form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="logo"><i class="fas fa-skull-crossbones"></i></div>
   <h1>JASMIN</h1>
   <p class="sub">Ransomware Control Panel</p>

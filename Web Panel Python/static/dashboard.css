@@ -116,3 +116,19 @@ tbody tr:hover{background:rgba(77,195,250,.03)}
 @media(min-width:1400px){
   .content{max-width:1280px;margin-left:auto;margin-right:auto;padding-left:calc(220px + 40px)}
 }
+
+/* ── 账户设置 / 修改密码 ── */
+.pw-form{max-width:460px}
+.pw-form .field{margin-bottom:14px}
+.pw-form .field label{display:block;font-size:.72rem;color:var(--muted);margin-bottom:5px}
+.pw-form .field input{width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);
+  border-radius:8px;color:var(--text);font-size:.85rem;outline:none;box-sizing:border-box;transition:border-color .15s}
+.pw-form .field input:focus{border-color:var(--accent)}
+.pw-hint{font-size:.72rem;color:var(--muted);margin:-6px 0 14px;line-height:1.6}
+.pw-strength{height:5px;border-radius:3px;background:var(--surface2);margin-top:8px;overflow:hidden}
+.pw-strength>div{height:5px;width:0;border-radius:3px;transition:width .25s,background .25s}
+.pw-meta{display:flex;justify-content:space-between;font-size:.7rem;color:var(--muted);margin-top:5px}
+#pw-result{margin-top:14px;font-size:.82rem;line-height:1.6}
+.pw-acct{display:inline-flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);
+  border-radius:8px;padding:8px 14px;color:#cbd5e1;font-size:.82rem;margin-bottom:20px}
+.pw-acct i{color:var(--accent2)}

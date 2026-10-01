@@ -59,6 +59,27 @@ if redis_host:
 
 db = SQLAlchemy(app)
 
+
+# ── CSRF 保护 ──
+def csrf_token():
+    """获取/生成当前会话的 CSRF 令牌"""
+    if 'csrf_token' not in session:
+        session['csrf_token'] = secrets.token_hex(32)
+    return session['csrf_token']
+
+
+def csrf_ok():
+    """校验 POST 请求携带的 CSRF 令牌"""
+    t = request.form.get('csrf_token', '')
+    s = session.get('csrf_token', '')
+    return bool(t) and bool(s) and secrets.compare_digest(t, s)
+
+
+@app.context_processor
+def _inject_csrf():
+    return {'csrf_token': csrf_token}
+
+
 class Admin(db.Model):
     __tablename__ = 'master'
     id = db.Column(db.Integer, primary_key=True)
@@ -191,6 +212,9 @@ def login():
     if not is_installed(): return redirect(url_for('install'))
     if 'username' in session: return redirect(url_for('dashboard'))
     if request.method == 'POST':
+        if not csrf_ok():
+            flash('会话已过期或请求非法，请重试', 'error')
+            return render_template('login.html')
         ip = request.remote_addr or 'unknown'
         fail_key = f'fail_{ip}'
         fail_time_key = f'fail_t_{ip}'
@@ -218,6 +242,58 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for('login'))
+
+
+# ── 修改管理员密码 ──
+@app.route('/change_password', methods=['POST'])
+@login_required
+def change_password():
+    if not csrf_ok():
+        return jsonify(ok=False, msg='CSRF 校验失败，请刷新页面重试'), 403
+    import time as _t, re as _re
+    ip = (request.remote_addr or '').replace('.', '_').replace(':', '_')
+    fk, fkt = f'pw_fail_{ip}', f'pw_fail_t_{ip}'
+    now = int(_t.time())
+    fc = int(session.get(fk, 0) or 0)
+    ft = int(session.get(fkt, 0) or 0)
+    if now - ft > 600: fc = 0
+    if fc >= 8:
+        return jsonify(ok=False, msg='尝试过于频繁，请 10 分钟后再试'), 429
+
+    cur  = request.form.get('current_password', '')
+    new  = request.form.get('new_password', '')
+    new2 = request.form.get('confirm_password', '')
+
+    admin = Admin.query.filter_by(username=session.get('username')).first()
+    if (not admin) or (not _verify_password(admin.password, cur)):
+        session[fk] = fc + 1
+        if fc == 0: session[fkt] = now
+        return jsonify(ok=False, msg='当前密码不正确')
+
+    if len(new) < 8:
+        return jsonify(ok=False, msg='新密码至少 8 位')
+    if len(new.encode('utf-8')) > 72:
+        return jsonify(ok=False, msg='新密码过长（最长 72 字节）')
+    if new != new2:
+        return jsonify(ok=False, msg='两次输入的新密码不一致')
+    if secrets.compare_digest(cur, new):
+        return jsonify(ok=False, msg='新密码不能与当前密码相同')
+    classes = sum(bool(_re.search(p, new)) for p in (r'[a-z]', r'[A-Z]', r'[0-9]', r'[^a-zA-Z0-9]'))
+    if classes < 2:
+        return jsonify(ok=False, msg='新密码需包含小写字母、大写字母、数字、符号中的至少两类')
+
+    h = _bcrypt.hashpw(new.encode('utf-8'), _bcrypt.gensalt()).decode('utf-8')
+    if h.startswith('$2b$'):
+        h = '$2y$' + h[4:]        # 转成 PHP password_verify 兼容的标识
+    admin.password = h
+    db.session.commit()
+
+    session.pop(fk, None); session.pop(fkt, None)
+    try:
+        open(os.path.join(os.path.dirname(__file__), '.pw_changed'), 'w').write(datetime.datetime.now().isoformat())
+    except Exception:
+        pass
+    return jsonify(ok=True, msg='密码已更新，请使用新密码重新登录')
 
 # ── Dashboard ──
 @app.route('/dashboard')
@@ -295,6 +371,8 @@ def handshake():
 @app.route('/generate', methods=['POST'])
 @login_required
 def generate():
+    if not csrf_ok():
+        return jsonify(ok=False, msg='CSRF 校验失败，请刷新页面重试'), 403
     plat = request.form.get('platform','')
     c2 = request.form.get('c2_url','')
     sec = request.form.get('secret', app.config['HANDSHAKE_SECRET'])
@@ -387,6 +465,8 @@ def check_update():
 @app.route('/keygen', methods=['POST'])
 @login_required
 def keygen():
+    if not csrf_ok():
+        return jsonify(ok=False, msg='CSRF 校验失败，请刷新页面重试'), 403
     from cryptography.hazmat.primitives.asymmetric import rsa as rsa_gen
     from cryptography.hazmat.primitives import serialization as ser
     from cryptography.hazmat.backends import default_backend
@@ -420,6 +500,8 @@ def keygen():
 @app.route('/do_update', methods=['POST'])
 @login_required
 def do_update():
+    if not csrf_ok():
+        return jsonify(ok=False, msg='CSRF 校验失败，请刷新页面重试'), 403
     import subprocess, zipfile, tempfile, shutil, urllib.request
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     token = os.environ.get('GIT_TOKEN','')
