@@ -29,6 +29,14 @@ fi
 # 没有任何账号可登录（安装向导也因 installed 被跳过）。
 # 这里从环境变量取口令；未设置则跳过并明确告警。
 # 哈希统一用 bcrypt($2y$) —— 与 PHP 端共用同一张 master 表，两端都要能验证通过。
+# ★ 管理员已在后台改过口令就跳过建号 —— 否则每次容器重建都会
+# DELETE + INSERT 把口令重置回 ADMIN_PASSWORD（与 PHP entrypoint 同一问题）。
+PW_MARK=/app/payloads/.pw_changed
+if [ -f "$PW_MARK" ]; then
+  echo "[entrypoint] 检测到 $PW_MARK —— 跳过建号（不覆盖管理员已改的口令）"
+  ADMIN_PASSWORD=""
+fi
+
 if [ -n "$ADMIN_PASSWORD" ]; then
   for i in $(seq 1 15); do
     if python3 <<'PY' 2>/dev/null

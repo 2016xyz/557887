@@ -31,7 +31,21 @@ ADMIN_PW="${ADMIN_PASSWORD:-admin123}"
 if [ -z "${ADMIN_PASSWORD:-}" ]; then
   echo "[entrypoint] !! ADMIN_PASSWORD 未设置，使用初始口令 admin123 —— 请部署后立即在后台修改"
 fi
+
+# ★ 管理员已在后台改过口令吗？
+# 以前这里【每次启动都无条件】跑 setup.php → UPDATE master SET creds=...
+# 于是：管理员在后台设了强口令 → 任何一次 docker restart / compose up -d /
+# 宿主机重建 → 口令被静默回滚成 ADMIN_PASSWORD（未设置时就是 admin123）。
+# change_password.php 早已在写 .pw_changed 标记，但从来没有任何代码读它。
+# 标记放在共享卷 payloads/ 下：两个 php 副本与两个 python 副本都能看到同一份，
+# 且 payloads/ 对 .开头文件有 .htaccess deny + app.py 白名单双保险。
+PW_MARK=/var/www/html/payloads/.pw_changed
+if [ -f "$PW_MARK" ]; then
+  echo "[entrypoint] 检测到 $PW_MARK —— 管理员已自行改过口令，跳过建号（不覆盖）"
+  ADMIN_OK=2
+fi
 for i in $(seq 1 15); do
+  [ "$ADMIN_OK" = "2" ] && break
   if php /var/www/html/setup.php "$ADMIN_PW" 2>/dev/null; then
     echo "[entrypoint] admin ready"
     ADMIN_OK=1

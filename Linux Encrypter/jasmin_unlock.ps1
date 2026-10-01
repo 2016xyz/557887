@@ -33,7 +33,10 @@ if (-not $Paths -or $Paths.Count -eq 0) {
     $Paths = @()
     # 所有固定磁盘
     foreach ($d in [System.IO.DriveInfo]::GetDrives()) {
-        if ($d.IsReady -and ($d.DriveType -eq 'Fixed' -or $d.DriveType -eq 'Removable')) {
+        # 不加 DriveType 过滤：载荷遍历的是 DriveInfo.GetDrives() 且只看
+        # IsReady，映射的网络盘同样会被加密。这里若只收 Fixed/Removable，
+        # 网络盘上的加密文件在"解密全部"下就永远解不回来。
+        if ($d.IsReady) {
             $Paths += $d.RootDirectory.FullName
         }
     }
@@ -70,8 +73,15 @@ try {
     $aes = [System.Security.Cryptography.Aes]::Create()
     $aes.Key = $kb; $aes.IV = $iv; $aes.Mode = 'CBC'; $aes.Padding = 'PKCS7'
     $dec = $aes.CreateDecryptor()
-    $pem = $dec.TransformFinalBlock($ct, 0, $ct.Length)
-    if ($pem.Length -lt 100) { throw "Private key decryption failed (wrong K passphrase?)" }
+    # 必须 catch：K 不对时 PKCS7 去填充必失败并抛 CryptographicException，
+    # 而外层 try 只有 finally、没有 catch —— 用户看到的是裸 .NET 堆栈，
+    # 下面那句 "wrong K passphrase?" 根本到不了。
+    try {
+        $pem = $dec.TransformFinalBlock($ct, 0, $ct.Length)
+    } catch {
+        throw "Private key decryption failed - wrong K passphrase, or the .pem.enc is corrupt/replaced"
+    }
+    if ($pem.Length -lt 100) { throw "Private key decryption failed - wrong K passphrase, or the .pem.enc is corrupt/replaced" }
 
     $rsa = [System.Security.Cryptography.RSA]::Create()
     $rsa.ImportFromPem([System.Text.Encoding]::UTF8.GetString($pem))
@@ -89,9 +99,17 @@ try {
                 $b = [IO.File]::ReadAllBytes($f)
                 if ($b.Length -lt 308) { throw "File too small ($($b.Length)B), likely corrupt" }
 
+                # ★ 边界检查必须在 [int] 转换【之前】做完。
+                # $ekLen 是 UInt32，一旦 >= 2^31（被篡改或损坏的文件），
+                # [int]$ekLen 会先抛 OverflowException，下面那句
+                # "Abnormal RSA key block length" 永远不可达，用户看到的是一串
+                # 与真实原因无关的 .NET 堆栈。同样地本版此前缺 128 的下界
+                # （sh 版有），ekLen=0 会退化成非法切片后才靠异常兜底。
                 $ekLen = [BitConverter]::ToUInt32($b, $b.Length - 4)
+                if ($ekLen -lt 128 -or $ekLen -gt 512 -or $ekLen -gt ($b.Length - 36)) {
+                    throw "Abnormal RSA key block length ($ekLen)"
+                }
                 $ekOff = $b.Length - 4 - [int]$ekLen
-                if ($ekOff -le 32 -or $ekLen -gt 512) { throw "Abnormal RSA key block length ($ekLen)" }
 
                 $sha   = [byte[]]$b[0..31]
                 $cblob = [byte[]]$b[32..($ekOff - 1)]

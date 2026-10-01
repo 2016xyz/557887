@@ -51,14 +51,22 @@ command -v openssl >/dev/null 2>&1 || { echo "[!] openssl not found - cannot dec
 command -v od >/dev/null 2>&1 || { echo "[!] od command not found"; exit 1; }
 
 TD="/tmp/.junlock_$$"
-mkdir -p "$TD" || exit 1
+(umask 077 && mkdir -p "$TD") || exit 1
+chmod 700 "$TD"
+# 0700 是必须的：默认 umask 下 $TD 为 0755、解出的 priv.pem 为 0644，
+# 多用户机器上整个解密期间明文私钥都可被其他本地用户读取。
 trap 'rm -rf "$TD"' EXIT INT TERM
 
 DL(){
+    # -f / --fail：HTTP >= 400 时 curl 返回非零，且不把错误正文写进输出文件。
+    # 没有它就会踩这个坑：后台对不存在的东西返回 404 "Not found."、
+    # 对 .key_secret 返回 403 "Forbidden"，这些正文都非空，下面的
+    # [ -s "$2" ] 会判定为"下载成功"，接着就去 sh 一页 Forbidden，
+    # 报出的错误跟真实原因毫不相干。
     if command -v curl >/dev/null 2>&1; then
-        curl -sL "$1" -o "$2"
+        curl -fsSL "$1" -o "$2" || return 1
     elif command -v wget >/dev/null 2>&1; then
-        wget -q -O "$2" "$1"
+        wget -q -O "$2" "$1" || return 1
     else
         echo "[!] need curl or wget"; return 1
     fi

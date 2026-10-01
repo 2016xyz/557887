@@ -36,8 +36,9 @@ def test_roundtrip():
     aes_key = os.urandom(32)
     aes_iv = os.urandom(16)
     c = Cipher(algorithms.AES(aes_key), modes.CBC(aes_iv), default_backend())
-    ct = c.encryptor().update(pad16(plain)) + c.encryptor().finalize()
-    # re-encrypt properly
+    # 这里原本还有一行用两个【不同】encryptor 实例拼出来的密文
+    # （update 与 finalize 各来自一个新实例），结果立刻被下面正确的一次覆盖 ——
+    # 纯死代码，且一旦行序变动就会产出无法解密的密文，已删除。
     enc = c.encryptor()
     ct = enc.update(pad16(plain)) + enc.finalize()
     km = aes_key + aes_iv

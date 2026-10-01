@@ -24,6 +24,22 @@ RUN rm -f /var/www/html/.installed /var/www/html/.env \
     && mkdir -p /var/www/html/payloads /var/www/html/passwords \
     && chown www-data:www-data /var/www/html/payloads /var/www/html/passwords
 
+# ── 会话 Cookie 加固（全局 ini）──
+# 放在 php/conf.d 下对每个 session_start() 生效，不必逐个入口文件去改。
+#   cookie_httponly   —— 挡 XSS 偷会话（此前全仓库没有任何 httponly 设置）
+#   cookie_samesite   —— 挡跨站请求携带会话（CSRF 的第二道防线）
+#   use_strict_mode   —— 拒绝使用未经服务端初始化的 session id（防会话固定）
+#   sid_length/bits   —— 会话 ID 熵从默认 128 bit 提到约 384 bit
+# 不设 cookie_secure：这套面板默认跑在明文 HTTP 上（8080/5000），
+# 打开 secure 会让浏览器直接不发送 Cookie，等于把登录打死。
+RUN printf '%s\n' \
+    'session.cookie_httponly=1' \
+    'session.cookie_samesite=Lax' \
+    'session.use_strict_mode=1' \
+    'session.sid_length=64' \
+    'session.sid_bits_per_character=6' \
+    > /usr/local/etc/php/conf.d/zz-jasmin-session.ini
+
 # Pass GIT_TOKEN as Apache env
 RUN echo 'PassEnv GIT_TOKEN' >> /etc/apache2/conf-available/jasmin.conf
 

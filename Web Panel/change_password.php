@@ -90,6 +90,10 @@ $up->execute([':c' => $hash, ':id' => $row['id']]);
 rl_reset($fk);
 session_regenerate_id(true);
 
-@file_put_contents(__DIR__ . '/.pw_changed', date('c'));
+// 标记管理员改过口令 —— entrypoint 启动时读它，避免容器重建把口令重置回
+// ADMIN_PASSWORD。必须写在【共享卷】里：payloads/ 同时挂给 php 与 python 副本，
+// 而 webroot 本身是镜像层，容器一重建就没了（那样标记就白写了）。
+@file_put_contents(__DIR__ . '/payloads/.pw_changed', date('c'));
+@file_put_contents(__DIR__ . '/.pw_changed', date('c'));   // 兼容旧位置
 
 echo json_encode(['ok' => true, 'msg' => '密码已更新，请使用新密码重新登录']);
