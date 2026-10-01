@@ -19,15 +19,19 @@
 export LC_ALL=C
 export LANG=C
 
-SRV="$1"
-K="$2"
-shift 2 2>/dev/null
+SRV="${1:-}"
+K="${2:-}"
 
 if [ -z "$SRV" ] || [ -z "$K" ]; then
     echo "Usage: $0 <server-url> <K-passphrase> [dir1 dir2 ...]"
     echo "  e.g.: $0 http://1.2.3.4:8080 7bc5cf6c... /path/to/data"
     exit 1
 fi
+
+# shift 必须放在参数校验之后：dash（Ubuntu/Debian 的 /bin/sh）在参数不足时
+# 执行 shift 会抛 "Bad substitution" 并终止脚本（rc=2，连 Usage 都打不出来），
+# 而 bash 只是返回非零并继续。走到这里 $# >= 2 已成立，shift 必然成功。
+shift 2
 
 # 目录：未指定 => 解密全部加密文件（下面不向解密器传目录，由它用全量默认范围）
 if [ -n "$*" ]; then
