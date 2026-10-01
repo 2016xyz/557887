@@ -28,11 +28,11 @@ if ($search !== '') {
 $total_pages = max(1,(int)ceil($total_rows/$records_per_page));
 if ($pageno > $total_pages) $pageno = $total_pages;
 $rows = $data_stmt->fetchAll();
-// 是否有主机正在加密（用于自动刷新进度条）
+// 全库是否有进行中任务（跨分页），决定是否自动刷新进度条
 $has_active = false;
-foreach ($rows as $__r) {
-    if (isset($__r['is_complete']) && intval($__r['is_complete']) === 0) { $has_active = true; break; }
-}
+try {
+    $has_active = (int)$pdo->query('SELECT COUNT(*) FROM victims WHERE is_complete = 0')->fetchColumn() > 0;
+} catch (PDOException $e) { $has_active = false; }
 function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
 $csrf = csrf_token();
 ?>

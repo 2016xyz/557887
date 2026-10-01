@@ -238,7 +238,11 @@ def dashboard():
     total_pages = max(1, -(-total // per_page))
     ks_path = os.path.join(PAYLOAD_DIR, '.key_secret')
     aes_key = open(ks_path).read().strip() if os.path.exists(ks_path) else 'KEY_NOT_SET'
-    has_active = any(int(getattr(v, 'is_complete', 1) or 1) == 0 for v in victims)
+    # 检测全库是否有进行中任务（跨分页），决定是否自动刷新
+    try:
+        has_active = db.session.query(Victim.id).filter(Victim.is_complete == 0).first() is not None
+    except Exception:
+        has_active = False
     return render_template('dashboard.html', victims=victims, page=page,
         total_pages=total_pages, total=total, search=search, version=CURRENT_VERSION,
         aes_key=aes_key, has_active=has_active)
