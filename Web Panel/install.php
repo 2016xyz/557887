@@ -31,8 +31,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!preg_match('/^\d{1,5}$/', $port) || (int)$port < 1 || (int)$port > 65535) {
             throw new RuntimeException('数据库端口不合法');
         }
-        if (!preg_match('/^[A-Za-z0-9_\-]{1,64}$/', $secret)) {
-            throw new RuntimeException('握手密钥只能包含字母、数字、下划线、连字符');
+        if (!preg_match('/^[A-Za-z0-9_\-@.!$%&*+=]{1,64}.$/', $secret)) {
+            throw new RuntimeException('握手密钥只能包含字母、数字及 - _ @ . ! $ % & * + = （不能有引号/反斜杠/空格）');
         }
         try {
             $dsn = "mysql:host={$host};port={$port};charset=utf8mb4";
