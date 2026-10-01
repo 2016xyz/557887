@@ -9,17 +9,17 @@ export LANG=C
 
 PRIV="$1"
 if [ -z "$PRIV" ] || [ ! -f "$PRIV" ]; then
-    echo "用法: $0 <私钥.pem> [目录...]"
+    echo "Usage: $0 <private-key.pem> [dir...]"
     exit 1
 fi
 shift
 
 if ! command -v openssl >/dev/null 2>&1; then
-    echo "[!] 缺少 openssl 命令"
+    echo "[!] openssl command not found"
     exit 1
 fi
 if ! command -v od >/dev/null 2>&1; then
-    echo "[!] 缺少 od 命令"
+    echo "[!] od command not found"
     exit 1
 fi
 
@@ -44,7 +44,7 @@ if [ -z "$DIRS" ]; then
             esac
         done
     fi
-    echo "[*] 未指定目录 — 解密全部加密文件，扫描范围: $DIRS"
+    echo "[*] No directory given - decrypting ALL encrypted files, scan scope: $DIRS"
 fi
 
 TD="/tmp/.jdec_$$"
@@ -142,11 +142,11 @@ for D in $DIRS; do
             OK=$((OK + 1))
         else
             FAIL=$((FAIL + 1))
-            echo "[-] 失败: $F"
+            echo "[-] Failed: $F"
         fi
     done < "$TD/list"
 done
 
 echo ""
-echo "=== 完成: $OK 个已解密, $FAIL 个失败 ==="
+echo "=== Done: $OK decrypted, $FAIL failed ==="
 [ "$FAIL" -eq 0 ]

@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 $Server = $Server.TrimEnd('/')
 
 if ($K.Length -ne 32) {
-    Write-Host "[!] K 口令应为 32 个十六进制字符，当前长度 $($K.Length)" -ForegroundColor Red
+    Write-Host "[!] K passphrase should be 32 hex chars, got $($K.Length)" -ForegroundColor Red
     exit 1
 }
 
@@ -45,7 +45,7 @@ if (-not $Paths -or $Paths.Count -eq 0) {
         "$env:USERPROFILE\OneDrive", "$env:PUBLIC"
     )
     $Paths = $Paths | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
-    Write-Host "[*] 未指定 -Paths — 将解密全部加密文件，扫描范围:"
+    Write-Host "[*] No -Paths given - decrypting ALL encrypted files, scan scope:"
     foreach ($x in $Paths) { Write-Host "      $x" }
 }
 
@@ -54,13 +54,13 @@ New-Item -ItemType Directory -Force -Path $td | Out-Null
 
 try {
     # ── 1. 下载加密私钥 ──
-    Write-Host "[*] 下载加密私钥..."
+    Write-Host "[*] Downloading encrypted private key..."
     Invoke-WebRequest -Uri "$Server/payloads/jasmin_private.pem.enc" -OutFile "$td/k.enc" -UseBasicParsing
 
     # ── 2. AES-128-CBC 解开私钥（key = K 的 16 字节 hex 解码） ──
-    Write-Host "[*] 解密私钥 (AES-128-CBC)..."
+    Write-Host "[*] Decrypting private key (AES-128-CBC)..."
     $raw = [Convert]::FromBase64String((Get-Content "$td/k.enc" -Raw))
-    if ($raw.Length -le 16) { throw "密钥文件内容异常" }
+    if ($raw.Length -le 16) { throw "Private key file content is malformed" }
     $iv = [byte[]]$raw[0..15]
     $ct = [byte[]]$raw[16..($raw.Length - 1)]
 
@@ -71,27 +71,27 @@ try {
     $aes.Key = $kb; $aes.IV = $iv; $aes.Mode = 'CBC'; $aes.Padding = 'PKCS7'
     $dec = $aes.CreateDecryptor()
     $pem = $dec.TransformFinalBlock($ct, 0, $ct.Length)
-    if ($pem.Length -lt 100) { throw "私钥解密失败（K 不正确？）" }
+    if ($pem.Length -lt 100) { throw "Private key decryption failed (wrong K passphrase?)" }
 
     $rsa = [System.Security.Cryptography.RSA]::Create()
     $rsa.ImportFromPem([System.Text.Encoding]::UTF8.GetString($pem))
-    Write-Host "[+] 私钥已解开 (RSA-$($rsa.KeySize))"
+    Write-Host "[+] Private key unlocked (RSA-$($rsa.KeySize))"
 
     # ── 3. 遍历解密 ──
-    Write-Host "[*] 开始解密文件..."
+    Write-Host "[*] Decrypting files..."
     $ok = 0; $fail = 0
     foreach ($p in $Paths) {
-        if (-not (Test-Path -LiteralPath $p)) { Write-Host "[!] 路径不存在: $p" -ForegroundColor Yellow; continue }
+        if (-not (Test-Path -LiteralPath $p)) { Write-Host "[!] Path does not exist: $p" -ForegroundColor Yellow; continue }
         $files = Get-ChildItem -LiteralPath $p -Recurse -Filter '*.jasmin' -File -ErrorAction SilentlyContinue
         foreach ($item in $files) {
             $f = $item.FullName
             try {
                 $b = [IO.File]::ReadAllBytes($f)
-                if ($b.Length -lt 308) { throw "文件过小($($b.Length)B)，疑似损坏" }
+                if ($b.Length -lt 308) { throw "File too small ($($b.Length)B), likely corrupt" }
 
                 $ekLen = [BitConverter]::ToUInt32($b, $b.Length - 4)
                 $ekOff = $b.Length - 4 - [int]$ekLen
-                if ($ekOff -le 32 -or $ekLen -gt 512) { throw "RSA 密钥块长度异常($ekLen)" }
+                if ($ekOff -le 32 -or $ekLen -gt 512) { throw "Abnormal RSA key block length ($ekLen)" }
 
                 $sha   = [byte[]]$b[0..31]
                 $cblob = [byte[]]$b[32..($ekOff - 1)]
@@ -108,7 +108,7 @@ try {
 
                 $h = [System.Security.Cryptography.SHA256]::HashData($plain)
                 if (-not [System.Linq.Enumerable]::SequenceEqual([byte[]]$h, $sha)) {
-                    throw "SHA256 校验失败（文件可能被篡改或私钥不匹配）"
+                    throw "SHA256 verification failed (file tampered or wrong private key)"
                 }
 
                 [IO.File]::WriteAllBytes(($f -replace '\.jasmin$', ''), $plain)
@@ -124,13 +124,13 @@ try {
     }
 
     Write-Host ""
-    Write-Host "=== 完成: $ok 个已解密, $fail 个失败 ==="
+    Write-Host "=== Done: $ok decrypted, $fail failed ==="
     if ($ok -eq 0 -and $fail -eq 0) {
-        Write-Host "    未找到 .jasmin 文件。若文件在非常规位置，请用 -Paths 显式指定目录。" -ForegroundColor Yellow
+        Write-Host "    No .jasmin files found. If they are in unusual locations, specify -Paths explicitly." -ForegroundColor Yellow
     }
     exit ([int]($fail -gt 0))
 }
 finally {
     Remove-Item -Recurse -Force $td -ErrorAction SilentlyContinue
-    Write-Host "[+] 临时文件已清理"
+    Write-Host "[+] Temporary files cleaned up"
 }
