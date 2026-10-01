@@ -2,6 +2,10 @@
 /**
  * Jasmin Web安装引导 — 检测环境、配置数据库、创建管理员
  */
+// 必须在最前：下面第 21 行起就用 post_str()，而 input.php 原本要等
+// 第 113 行 require db_conection.php 时才被间接加载 —— 那会让整个安装流程
+// 一进 POST 就 "Call to undefined function post_str()" 直接致命错误。
+require_once __DIR__ . '/includes/input.php';
 session_start();
 
 // 如果已安装，跳转登录
@@ -18,12 +22,14 @@ $success = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($step === 2) {
         // 测试数据库连接
-        $host = trim($_POST['db_host'] ?? 'localhost');
-        $port = trim($_POST['db_port'] ?? '3306');
-        $name = trim($_POST['db_name'] ?? 'jasmin_db');
-        $user = trim($_POST['db_user'] ?? '');
-        $pass = $_POST['db_pass'] ?? '';
-        $secret = trim($_POST['secret'] ?? 'jasmin@123');
+        // post_str：`db_host[]=x` 传数组会让 trim/preg_match 抛 TypeError → 500。
+        // install.php 属性上就是未授权可达的（未安装时无鉴权），所以这里尤其重要。
+        $host = trim(post_str('db_host', 'localhost'));
+        $port = trim(post_str('db_port', '3306'));
+        $name = trim(post_str('db_name', 'jasmin_db'));
+        $user = trim(post_str('db_user'));
+        $pass = post_str('db_pass');
+        $secret = trim(post_str('secret', 'jasmin@123'));
         // 主机/端口同样会拼进 DSN，且 .env 会被后续流程复用
         if (!preg_match('/^[A-Za-z0-9._\-]{1,255}$/', $host)) {
             throw new RuntimeException('数据库主机名格式不合法');
@@ -31,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!preg_match('/^\d{1,5}$/', $port) || (int)$port < 1 || (int)$port > 65535) {
             throw new RuntimeException('数据库端口不合法');
         }
-        if (!preg_match('/^[A-Za-z0-9_\-@.!$%&*+=]{1,64}.$/', $secret)) {
+        if (!preg_match('/^[A-Za-z0-9_\-@.!$%&*+=]{1,64}$/', $secret)) {
             throw new RuntimeException('握手密钥只能包含字母、数字及 - _ @ . ! $ % & * + = （不能有引号/反斜杠/空格）');
         }
         try {
@@ -100,9 +106,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (empty($_SESSION['install_db_ok'])) {
             $error = '请先完成第 2 步的数据库配置';
         } else {
-            $admin_user = trim($_POST['admin_user'] ?? 'admin');
-            $admin_pass = $_POST['admin_pass'] ?? '';
-            $admin_pass2 = $_POST['admin_pass2'] ?? '';
+            $admin_user  = trim(post_str('admin_user', 'admin'));
+            $admin_pass  = post_str('admin_pass');
+            $admin_pass2 = post_str('admin_pass2');
             if ($admin_user === '' || !preg_match('/^[A-Za-z0-9_.-]{1,64}$/', $admin_user)) {
                 $error = '用户名只能包含字母、数字、下划线、点、连字符（1-64 位）';
             } elseif (strlen($admin_pass) < 8) { $error = '密码至少8位'; }

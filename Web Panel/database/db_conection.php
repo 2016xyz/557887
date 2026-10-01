@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../includes/input.php';
 /**
  * 数据库连接 - 使用PDO预处理防SQL注入
  * 凭据从 .env 文件读取，不再硬编码
@@ -78,7 +79,18 @@ if (!file_exists($__schema_marker)) {
             try { $pdo->exec('ALTER TABLE victims ADD UNIQUE KEY uniq_systemid (systemid)'); }
             catch (PDOException $e) { error_log('schema migrate [uniq_systemid]: ' . $e->getMessage()); }
         }
-        @file_put_contents($__schema_marker, date('c'));
+        // 只有确认 victims 表存在、且迁移真的跑过，才落标记。
+        // 此前无条件写标记：若首次运行时表还没建（全新库），ALTER 全部报错、
+        // 被逐个 catch 吞掉，标记却照样写下 —— 迁移从此【永久跳过】，
+        // 后来建好的表再也补不上这些列。
+        $ok = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES
+                             WHERE TABLE_SCHEMA=:d AND TABLE_NAME='victims'");
+        $ok->execute([':d' => $db_name]);
+        if ((int)$ok->fetchColumn() > 0) {
+            @file_put_contents($__schema_marker, date('c'));
+        } else {
+            error_log('schema migrate: victims 表尚不存在，不落标记（下次请求会重试）');
+        }
     } catch (PDOException $e) {
         error_log('schema migrate failed: ' . $e->getMessage());
     }

@@ -11,7 +11,9 @@ bin/
 config.json
 .installed
 
-# 只忽略生成的载荷输出目录，不忽略模板里的payloads
+# 只忽略生成的载荷输出目录，不忽略模板里的 payloads
 /Web Panel/payloads/
 /Web Panel Python/payloads/
-/passwords/
+# 受害者上报目录（此前写成 /passwords/，与实际的 Web Panel/passwords/ 对不上，
+# 等于没忽略 —— 新生成的 .flora 会被误提交进仓库）
+/Web Panel/passwords/

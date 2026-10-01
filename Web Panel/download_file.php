@@ -63,6 +63,12 @@ $filename = basename($real);
 if ($filename === '.key_secret') {
     $filename = 'jasmin_key_secret.txt';
 }
+// 文件名原样拼进 Content-Disposition 就是响应头注入面 —— Linux 文件名可以含 "
+// 和换行。这里只保留保守字符集，其余替换掉。
+$filename = preg_replace('/[^A-Za-z0-9._\-]/', '_', $filename);
+if ($filename === '' || $filename[0] === '.') {
+    $filename = 'download_' . substr(hash('sha256', $real), 0, 12);
+}
 
 header('Cache-Control: no-store');
 header('Content-Description: File Transfer');
