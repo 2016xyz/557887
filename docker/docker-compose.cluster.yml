@@ -12,6 +12,7 @@ services:
       - php
       - python
     ports:
+      - "80:80"       # PHP 后台入口(无端口 URL, 与 8080 等价)
       - "8080:8080"   # PHP 后台入口
       - "5000:5000"   # Python 后台入口
     networks:

