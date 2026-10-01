@@ -24,14 +24,26 @@ echo "[entrypoint] session -> redis://${REDIS_HOST}:${REDIS_PORT:-6379}"
 fi
 
 # Wait for DB schema + auto-create admin
+ADMIN_OK=0
 for i in $(seq 1 15); do
   if php /var/www/html/setup.php admin123 2>/dev/null; then
     echo "[entrypoint] admin ready"
+    ADMIN_OK=1
     break
   fi
   echo "[entrypoint] waiting for DB ($i/15)..."
   sleep 3
 done
+
+# 标记安装完成。install.php 只在 .installed 不存在时才放行，
+# 而 Docker 部署路径以前从不写它 —— 结果是安装向导永久暴露，
+# 任何人都能 POST /install.php?step=3 抢注或覆盖管理员（已实测确认）。
+if [ "$ADMIN_OK" = "1" ] && [ ! -f /var/www/html/.installed ]; then
+  date '+%Y-%m-%d %H:%M:%S' > /var/www/html/.installed
+  chown www-data:www-data /var/www/html/.installed 2>/dev/null || true
+  chmod 0644 /var/www/html/.installed 2>/dev/null || true
+  echo "[entrypoint] .installed 已写入（安装向导已关闭）"
+fi
 
 # 解密工具：镜像烘焙在 /opt/jasmin-tools，运行时补进 payloads 卷内
 # (payloads/ 是 volume，镜像里 COPY 进去会被卷挂载覆盖)

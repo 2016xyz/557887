@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Jasmin C2 — Python Flask Backend with MySQL + Web Install Wizard"""
 import os, re, secrets, json, datetime
+from urllib.parse import quote_plus
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, send_file, flash, Response
 from flask_sqlalchemy import SQLAlchemy
@@ -160,18 +161,34 @@ def install():
     error = ''
     if request.method == 'POST':
         if step == 2:
-            host = request.form.get('db_host','localhost')
-            port = request.form.get('db_port','3306')
-            name = request.form.get('db_name','jasmin_db')
-            user = request.form.get('db_user','')
-            pw = request.form.get('db_pass','')
+            host = (request.form.get('db_host','localhost') or '').strip()
+            port = (request.form.get('db_port','3306') or '').strip()
+            name = (request.form.get('db_name','jasmin_db') or '').strip()
+            user = (request.form.get('db_user','') or '').strip()
+            pw = request.form.get('db_pass','') or ''
             secret = request.form.get('secret','jasmin@123')
-            url = f'mysql+pymysql://{user}:{pw}@{host}:{port}/{name}?charset=utf8mb4'
+            # 入参校验：库名会被直接拼进 CREATE DATABASE 语句（反引号可逃逸 => SQL 注入），
+            # 其余字段会拼进连接串（@ : / ? 会改变 URL 语义）。PHP 侧一直有白名单，这里补齐。
+            if not re.fullmatch(r'[A-Za-z0-9_]{1,64}', name):
+                error = '数据库名只能包含字母、数字、下划线（1-64 位）'
+                return render_template('install.html', step=2, error=error, env_docker=os.path.exists('/.dockerenv'))
+            if not re.fullmatch(r'[A-Za-z0-9._\-]{1,255}', host):
+                error = '数据库主机名格式不合法'
+                return render_template('install.html', step=2, error=error, env_docker=os.path.exists('/.dockerenv'))
+            if not re.fullmatch(r'\d{1,5}', port) or not (0 < int(port) < 65536):
+                error = '数据库端口不合法'
+                return render_template('install.html', step=2, error=error, env_docker=os.path.exists('/.dockerenv'))
+            if user and not re.fullmatch(r'[A-Za-z0-9._\-]{1,64}', user):
+                error = '数据库用户名格式不合法'
+                return render_template('install.html', step=2, error=error, env_docker=os.path.exists('/.dockerenv'))
+            url = (f'mysql+pymysql://{quote_plus(user)}:{quote_plus(pw)}@'
+                   f'{host}:{port}/{name}?charset=utf8mb4')
             try:
                 import pymysql
                 conn = pymysql.connect(host=host,port=int(port),user=user,password=pw)
                 cur = conn.cursor()
-                cur.execute(f"CREATE DATABASE IF NOT EXISTS `{name}` DEFAULT CHARACTER SET utf8mb4")
+                # 此处虽已白名单，仍用参数化形式防御未来改动
+                cur.execute("CREATE DATABASE IF NOT EXISTS `%s` DEFAULT CHARACTER SET utf8mb4" % name)
                 conn.close()
                 cfg = {'database_url':url,'handshake_secret':secret,'installed':False}
                 json.dump(cfg, open(CONFIG_FILE,'w'))

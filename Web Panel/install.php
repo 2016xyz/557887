@@ -74,21 +74,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
     elseif ($step === 3) {
-        $admin_user = trim($_POST['admin_user'] ?? 'admin');
-        $admin_pass = $_POST['admin_pass'] ?? '';
-        $admin_pass2 = $_POST['admin_pass2'] ?? '';
-        if (strlen($admin_pass) < 6) { $error = '密码至少6位'; }
-        elseif ($admin_pass !== $admin_pass2) { $error = '两次密码不一致'; }
-        else {
-            require_once __DIR__ . '/database/db_conection.php';
-            $hash = password_hash($admin_pass, PASSWORD_BCRYPT);
-            $stmt = $pdo->prepare('DELETE FROM master WHERE admin = :u');
-            $stmt->execute([':u' => $admin_user]);
-            $stmt = $pdo->prepare('INSERT INTO master (admin, creds) VALUES (:u, :p)');
-            $stmt->execute([':u' => $admin_user, ':p' => $hash]);
-            file_put_contents(__DIR__ . '/.installed', date('Y-m-d H:i:s'));
-            header('Location: install.php?step=4');
-            exit;
+        // 必须先由「本会话」完成第 2 步（数据库配置）。
+        // 否则在「.env 已写、.installed 未写」的窗口期，任何未授权请求都能直接
+        // POST install.php?step=3 —— 而下面的 DELETE+INSERT 会把已有管理员覆盖掉，
+        // 等于无需任何凭据即可接管后台。
+        if (empty($_SESSION['install_db_ok'])) {
+            $error = '请先完成第 2 步的数据库配置';
+        } else {
+            $admin_user = trim($_POST['admin_user'] ?? 'admin');
+            $admin_pass = $_POST['admin_pass'] ?? '';
+            $admin_pass2 = $_POST['admin_pass2'] ?? '';
+            if ($admin_user === '' || !preg_match('/^[A-Za-z0-9_.-]{1,64}$/', $admin_user)) {
+                $error = '用户名只能包含字母、数字、下划线、点、连字符（1-64 位）';
+            } elseif (strlen($admin_pass) < 8) { $error = '密码至少8位'; }
+            elseif (!preg_match('/[A-Za-z]/', $admin_pass) || !preg_match('/[0-9!-\/:-@\[-`{-~]/', $admin_pass)) {
+                $error = '密码需同时包含字母与数字（或符号）';
+            } elseif ($admin_pass !== $admin_pass2) { $error = '两次密码不一致'; }
+            else {
+                require_once __DIR__ . '/database/db_conection.php';
+                $hash = password_hash($admin_pass, PASSWORD_BCRYPT);
+                $stmt = $pdo->prepare('DELETE FROM master WHERE admin = :u');
+                $stmt->execute([':u' => $admin_user]);
+                $stmt = $pdo->prepare('INSERT INTO master (admin, creds) VALUES (:u, :p)');
+                $stmt->execute([':u' => $admin_user, ':p' => $hash]);
+                file_put_contents(__DIR__ . '/.installed', date('Y-m-d H:i:s'));
+                @chmod(__DIR__ . '/.installed', 0644);
+                unset($_SESSION['install_db_ok']);   // 用后即焚，防重放
+                header('Location: install.php?step=4');
+                exit;
+            }
         }
     }
 }
