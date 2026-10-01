@@ -12,8 +12,14 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !isset($_POST['handshake'])) {
 }
 
 // 从.env读取密钥
-$secret = $_ENV['HANDSHAKE_SECRET'] ?? 'jasmin@123';
-if (!hash_equals($secret, $_POST['handshake'])) {
+$secret = $_ENV['HANDSHAKE_SECRET'] ?? '';
+if ($secret === '') {
+    // 没配置密钥时不能回退到硬编码默认值（那等于公开的通行证）
+    http_response_code(503);
+    echo 'Handshake secret not configured.';
+    exit;
+}
+if (!is_string($_POST['handshake']) || !hash_equals($secret, $_POST['handshake'])) {
     http_response_code(403);
     echo 'Invalid handshake.';
     exit;
@@ -24,14 +30,21 @@ function sanitize_filename(string $name): string {
     return preg_replace('/[^a-zA-Z0-9_\-]/', '_', $name);
 }
 
-$machine_name   = $_POST['machine_name']   ?? '';
+$s = function($k,$d=''){ $v=$_POST[$k]??$d; return is_string($v)?$v:''; };
+$machine_name   = $s('machine_name');
 $computer_user  = $_POST['computer_user']  ?? '';
 $os             = $_POST['os']             ?? '';
 $date           = $_POST['date']           ?? '';
 $time           = $_POST['time']           ?? '';
 $systemid       = $_POST['systemid']       ?? '';
 $location       = $_POST['location']       ?? '';
-$ip             = $_POST['ip']             ?? '';
+// IP 取服务端可见的真实来源：nginx 已设 X-Forwarded-For，
+// 上报值可被被控端随意伪造，取证上不可信。
+$_xff = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
+$_rip = $_SERVER['HTTP_X_REAL_IP'] ?? '';
+if ($_rip !== '')                $ip = $_rip;
+elseif ($_xff !== '')            $ip = trim(explode(',', $_xff)[0]);
+else                             $ip = $_SERVER['REMOTE_ADDR'] ?? '';
 $password       = $_POST['password']       ?? '';
 $encrypted_count = intval($_POST['encrypted_count'] ?? 0);
 $encrypted_size  = intval($_POST['encrypted_size']  ?? 0);

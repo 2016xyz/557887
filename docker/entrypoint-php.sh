@@ -24,9 +24,15 @@ echo "[entrypoint] session -> redis://${REDIS_HOST}:${REDIS_PORT:-6379}"
 fi
 
 # Wait for DB schema + auto-create admin
+# 口令从 ADMIN_PASSWORD 取；未设置则退回初始口令 admin123，并在日志里明确告警
+# （硬编码 admin/admin123 意味着任何部署开局都是同一组可猜凭据）
 ADMIN_OK=0
+ADMIN_PW="${ADMIN_PASSWORD:-admin123}"
+if [ -z "${ADMIN_PASSWORD:-}" ]; then
+  echo "[entrypoint] !! ADMIN_PASSWORD 未设置，使用初始口令 admin123 —— 请部署后立即在后台修改"
+fi
 for i in $(seq 1 15); do
-  if php /var/www/html/setup.php admin123 2>/dev/null; then
+  if php /var/www/html/setup.php "$ADMIN_PW" 2>/dev/null; then
     echo "[entrypoint] admin ready"
     ADMIN_OK=1
     break
@@ -34,6 +40,9 @@ for i in $(seq 1 15); do
   echo "[entrypoint] waiting for DB ($i/15)..."
   sleep 3
 done
+if [ "$ADMIN_OK" != "1" ]; then
+  echo "[entrypoint] !! 15 次重试后仍未能创建管理员 —— 容器内可能没有任何可登录账号"
+fi
 
 # 标记安装完成。install.php 只在 .installed 不存在时才放行，
 # 而 Docker 部署路径以前从不写它 —— 结果是安装向导永久暴露，

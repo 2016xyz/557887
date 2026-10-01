@@ -4,15 +4,17 @@ services:
     image: mysql:8.0
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: jasmin_root_pw
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-jasmin_root_pw}
       MYSQL_DATABASE: jasmin_db
       MYSQL_USER: jasminadmin
-      MYSQL_PASSWORD: jasmin_secure_pw
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-jasmin_secure_pw}
     volumes:
       - mysql_data:/var/lib/mysql
       - ../Web Panel/database/jasmin_db.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     ports:
-      - "3306:3306"
+      # 默认只绑本机：此前 "3306:3306" 会监听 0.0.0.0，公网可直连拖库。
+      # 需要远程访问时用 DB_LISTEN 显式放开（并自行加防火墙）。
+      - "${DB_LISTEN:-127.0.0.1:3306}:3306"
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 5s
@@ -39,7 +41,7 @@ services:
       DB_NAME: jasmin_db
       DB_USER: jasminadmin
       DB_PASS: jasmin_secure_pw
-      HANDSHAKE_SECRET: jasmin@123
+      HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
     ports:
       - "8080:80"
 
@@ -61,7 +63,7 @@ services:
       DB_NAME: jasmin_db
       DB_USER: jasminadmin
       DB_PASS: jasmin_secure_pw
-      HANDSHAKE_SECRET: jasmin@123
+      HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
     ports:
       - "5000:5000"
 

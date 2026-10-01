@@ -112,6 +112,13 @@ decrypt_one(){
 
     OUT=$(printf '%s' "$F" | sed 's/\.jasmin$//')
     mv -f "$TD/plain" "$OUT" || return 1
+    # 明文是先落到 /tmp 再 mv 过来的，mode 由 umask 决定（通常 0644）。
+    # 加密时没有保存原始权限位，无法完整还原；但对明确敏感的文件名收紧到 0600，
+    # 避免 .env / 私钥 / 口令 这类文件在还原后变成同机其他用户可读。
+    case "${OUT##*/}" in
+        .env|*.pem|*.key|.key_secret|id_rsa|id_ed25519|authorized_keys|shadow|*.kdbx|*.pfx|*.p12|.git-credentials)
+            chmod 600 "$OUT" 2>/dev/null || true ;;
+    esac
     rm -f "$F"
     echo "[+] $OUT"
     return 0

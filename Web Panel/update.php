@@ -54,8 +54,19 @@ function check_update() {
         echo json_encode(['ok'=>true,'update'=>false,'current'=>CURRENT_VERSION,'msg'=>'无法连接更新服务器']);
         return;
     }
-    $has_update = ($remote_ver && $remote_ver !== CURRENT_VERSION) || ($sha && $json);
-    if ($remote_ver && $remote_ver === CURRENT_VERSION) $has_update = false;
+    // 旧写法 ($sha && $json) 只要有 commit 返回就算真，导致永远提示"有更新"。
+    // 正确：有远程版本号就先比版本号；版本号取不到时才退回比较本地 HEAD 与远程 sha。
+    if ($remote_ver !== '') {
+        $has_update = ($remote_ver !== CURRENT_VERSION);
+    } elseif ($sha !== '') {
+        $head = trim(@file_get_contents(dirname(__DIR__) . '/.git/refs/heads/master') ?: '');
+        if ($head === '') {
+            try { $head = trim(@shell_exec('git -C ' . escapeshellarg(dirname(__DIR__)) . ' rev-parse HEAD 2>/dev/null') ?: ''); } catch (Throwable $e) {}
+        }
+        $has_update = ($head !== '' && strpos($head, $sha) !== 0);
+    } else {
+        $has_update = false;
+    }
     echo json_encode(['ok'=>true,'update'=>$has_update,'current'=>CURRENT_VERSION,
         'latest'=>$remote_ver ?: CURRENT_VERSION,'latest_commit'=>$sha,'date'=>$date,'message'=>$msg]);
 }

