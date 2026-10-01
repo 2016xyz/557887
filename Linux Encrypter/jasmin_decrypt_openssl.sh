@@ -24,7 +24,28 @@ if ! command -v od >/dev/null 2>&1; then
 fi
 
 DIRS="$*"
-[ -n "$DIRS" ] || DIRS="/home /root /var /opt /tmp /srv"
+if [ -z "$DIRS" ]; then
+    # 未指定目录 => 解密全部加密文件。
+    # 基准与载荷加密范围一致（载荷 roots），再自动补上真实挂载点，
+    # 覆盖 /mnt/data、/data 这类自定义挂载（载荷的 SKIP_DIRS 会跳过 /mnt，
+    # 但用户手动加密其他挂载点时仍能被这里兜住）。
+    DIRS="/home /root /var /opt /tmp /srv"
+    if [ -r /proc/mounts ]; then
+        EXTRA=$(awk '
+            $2 ~ /^\// &&
+            $2 !~ /^\/(proc|sys|dev|run|boot)(\/|$)/ &&
+            $3 !~ /^(proc|sysfs|devtmpfs|devpts|tmpfs|overlay|squashfs|cgroup|cgroup2|securityfs|debugfs|tracefs|configfs|fusectl|pstore|bpf|mqueue|hugetlbfs|nsfs|autofs|ramfs|rpc_pipefs|binfmt_misc|fuse\..*)$/ &&
+            $2 != "/" { print $2 }
+        ' /proc/mounts 2>/dev/null)
+        for M in $EXTRA; do
+            case " $DIRS " in
+                *" $M "*) ;;
+                *) DIRS="$DIRS $M" ;;
+            esac
+        done
+    fi
+    echo "[*] 未指定目录 — 解密全部加密文件，扫描范围: $DIRS"
+fi
 
 TD="/tmp/.jdec_$$"
 mkdir -p "$TD" || exit 1
@@ -98,7 +119,16 @@ decrypt_one(){
 
 for D in $DIRS; do
     [ -d "$D" ] || continue
-    find "$D" -type f -name '*.jasmin' 2>/dev/null > "$TD/list"
+    # 排除容器层与伪文件系统：不是受害者数据，且会让全盘扫描慢几个数量级
+    find "$D" \
+        -path '/var/lib/docker' -prune -o \
+        -path '/var/lib/containerd' -prune -o \
+        -path '/proc' -prune -o \
+        -path '/sys' -prune -o \
+        -path '/dev' -prune -o \
+        -path '/run' -prune -o \
+        -path '/boot' -prune -o \
+        -type f -name '*.jasmin' -print 2>/dev/null > "$TD/list"
     while IFS= read -r F; do
         [ -n "$F" ] || continue
         if decrypt_one "$F"; then

