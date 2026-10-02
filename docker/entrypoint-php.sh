@@ -28,7 +28,20 @@ fi
 # （硬编码 admin/admin123 意味着任何部署开局都是同一组可猜凭据）
 ADMIN_OK=0
 ADMIN_PW="${ADMIN_PASSWORD:-admin123}"
-if [ -z "${ADMIN_PASSWORD:-}" ]; then
+
+# 先判断管理员是否已存在（已建过号 / 改过口令）——避免下面打印"将使用 admin123"
+# 这种误导性提示（实际上根本不会去建号/改号，口令保持原样）。
+PW_MARK=/var/www/html/payloads/.pw_changed
+ADMIN_PRESENT=0
+if [ -f "$PW_MARK" ]; then
+  ADMIN_PRESENT=2
+else
+  # 表里已有任何管理员 -> 也不需要再建
+  if php -r 'require "/var/www/html/database/db_conection.php"; exit((int)$pdo->query("SELECT COUNT(*) FROM master")->fetchColumn()>0?0:1);' 2>/dev/null; then
+    ADMIN_PRESENT=2
+  fi
+fi
+if [ "$ADMIN_PRESENT" != "2" ] && [ -z "${ADMIN_PASSWORD:-}" ]; then
   echo "[entrypoint] !! ADMIN_PASSWORD 未设置，使用初始口令 admin123 —— 请部署后立即在后台修改"
 fi
 
@@ -39,9 +52,8 @@ fi
 # change_password.php 早已在写 .pw_changed 标记，但从来没有任何代码读它。
 # 标记放在共享卷 payloads/ 下：两个 php 副本与两个 python 副本都能看到同一份，
 # 且 payloads/ 对 .开头文件有 .htaccess deny + app.py 白名单双保险。
-PW_MARK=/var/www/html/payloads/.pw_changed
-if [ -f "$PW_MARK" ]; then
-  echo "[entrypoint] 检测到 $PW_MARK —— 管理员已自行改过口令，跳过建号（不覆盖）"
+if [ "$ADMIN_PRESENT" = "2" ]; then
+  echo "[entrypoint] 管理员已存在（或已改过口令）—— 跳过建号，不覆盖现有口令"
   ADMIN_OK=2
 fi
 for i in $(seq 1 15); do
