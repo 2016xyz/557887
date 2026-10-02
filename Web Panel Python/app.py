@@ -242,7 +242,12 @@ def install():
                         Admin.query.filter_by(username=au).delete()
                         # 必须与 PHP 端一致用 bcrypt($2y$)：两面板共用同一个 master 表，
                         # werkzeug 默认的 scrypt 哈希 PHP 的 password_verify 认不出来。
-                        _h = _bcrypt.hashpw(ap_.encode('utf-8'), _bcrypt.gensalt(rounds=10, prefix=b'2y')).decode('utf-8')
+                        # ★ 注意：bcrypt 库的 gensalt() 只接受 prefix=b'2a'/b'2b'，
+                        #   传 b'2y' 会抛 ValueError（"Supported prefixes are b'2a' or b'2b'"），
+                        #   导致整步 500。正确做法：默认生成 $2b$，再把标识改成 $2y$
+                        #   （2b 与 2y 算法完全相同，PHP password_verify 两者都认）。
+                        _h = _bcrypt.hashpw(ap_.encode('utf-8'), _bcrypt.gensalt(rounds=10)).decode('utf-8')
+                        _h = '$2y$' + _h[4:]
                         db.session.add(Admin(username=au, password=_h))
                         db.session.commit()
                     cfg = load_config()

@@ -46,7 +46,9 @@ cfg = json.load(open('/app/config.json'))
 u = os.environ.get('ADMIN_USER', 'admin')
 p = os.environ['ADMIN_PASSWORD']
 e = create_engine(cfg['database_url'])
-h = bcrypt.hashpw(p.encode('utf-8'), bcrypt.gensalt(rounds=10, prefix=b'2y')).decode('utf-8')
+# gensalt 不支持 prefix=b'2y'（只支持 2a/2b），会 ValueError；先默认生成再改标识
+h = bcrypt.hashpw(p.encode('utf-8'), bcrypt.gensalt(rounds=10)).decode('utf-8')
+h = '$2y$' + h[4:]
 with e.begin() as c:
     c.execute(text("SELECT 1"))                 # 先确认表已就绪
     c.execute(text("DELETE FROM master WHERE admin=:u"), {'u': u})
