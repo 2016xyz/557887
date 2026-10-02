@@ -61,5 +61,5 @@ docker-compose up -d
 
 - MySQL 使用 healthcheck，PHP/Python 容器会等 MySQL 就绪后再启动
 - 首次启动需等 MySQL 初始化（约10-20秒）
-- 不再自动导入 SQL schema，由安装引导自动建表
+- 首次启动时 MySQL 会把 `Web Panel/database/jasmin_db.sql` 通过 `docker-entrypoint-initdb.d/` 自动导入（仅当数据卷为空时）；安装向导 `.installed` 关闭后不再走建表流程
 - 删除卷 `docker-compose down -v` 可完全重置

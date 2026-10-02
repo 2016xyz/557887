@@ -1,5 +1,8 @@
 # Jasmin C2 — 集群版 (Nginx负载均衡 + Redis Session + 多副本)
-# 用法: docker compose -f docker-compose.cluster.yml up -d --build --scale php=3 --scale python=2
+# 用法: docker compose -f docker-compose.cluster.yml up -d --build
+#   副本数由服务内 `deploy.replicas` 决定（php/python 各 2）；
+#   要临时改副本数用 --scale php=N，它会覆盖 deploy.replicas
+#   （两者同时写会在 compose v2 下产生告警/语义冲突，勿在命令里重复写死数量）
 
 services:
   # ── Nginx 负载均衡 ──
