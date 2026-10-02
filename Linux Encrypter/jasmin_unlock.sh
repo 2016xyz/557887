@@ -93,7 +93,9 @@ KEYHEX_ASCII=$(printf '%s' "$K" | od -An -tx1 | tr -d ' \n')
 try_dec(){
     # $1=cipher  $2=keyhex
     rm -f "$TD/priv.pem"
-    openssl enc -d -"$1" -K "$2" -iv "$IVHEX" -in "$TD/ct" -out "$TD/priv.pem" 2>/dev/null || return 1
+    # 显式 -nosalt：密钥由 -K 直接给出、不派生，salt 本就不参与；
+    # 加上它与另一个解密器 jasmin_decrypt_openssl.sh 保持一致，避免读者误解。
+    openssl enc -d -"$1" -nosalt -K "$2" -iv "$IVHEX" -in "$TD/ct" -out "$TD/priv.pem" 2>/dev/null || return 1
     [ -s "$TD/priv.pem" ] || return 1
     head -c 32 "$TD/priv.pem" | grep -q "BEGIN" || return 1
     return 0

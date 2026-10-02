@@ -23,6 +23,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $Server = $Server.TrimEnd('/')
 
+# 从网页复制 K 常带换行/空格（Windows 剪贴板还会带 CR/LF）。
+# sh 版 (jasmin_unlock.sh) 早已剥掉这些，ps1 版此前没有 —— 粘错就报
+# "K passphrase should be 32 hex chars"，与真实原因（复制噪声）不符。补齐一致性。
+$K = $K.Trim()
+
 if ($K.Length -ne 32) {
     Write-Host "[!] K passphrase should be 32 hex chars, got $($K.Length)" -ForegroundColor Red
     exit 1
