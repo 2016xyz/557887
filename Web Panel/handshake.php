@@ -50,6 +50,9 @@ $_rip = $_SERVER['HTTP_X_REAL_IP'] ?? '';
 if ($_rip !== '')                $ip = $_rip;
 elseif ($_xff !== '')            $ip = trim(explode(',', $_xff)[0]);
 else                             $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+// ip 列是 varchar(45)，但上面的取值没走 $cap —— 超长头会让 INSERT 报
+// Data too long 并被 catch 成 400，把一次正常上报打掉。
+$ip = substr($ip, 0, 45);
 $password        = $cap(post_str('password'), 200);
 $encrypted_count = post_int('encrypted_count');
 $encrypted_size  = post_int('encrypted_size');

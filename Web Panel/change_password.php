@@ -26,11 +26,8 @@ if (!csrf_verify()) {
 // 攻击者每次请求丢掉 cookie 就是一个"新会话"，限速形同虚设。
 // 登录路径早已改成文件级 + flock，改密路径当时漏改了，这里补齐。
 // IP 取可信来源（nginx 已设 X-Real-IP / X-Forwarded-For），与 checklogin.php 一致。
-$ip = $_SERVER['HTTP_X_REAL_IP'] ?? '';
-if ($ip === '') {
-    $xf = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
-    $ip = $xf !== '' ? trim(explode(',', $xf)[0]) : ($_SERVER['REMOTE_ADDR'] ?? '');
-}
+// 默认用 REMOTE_ADDR；仅 TRUST_PROXY=1 时才采信代理头（防伪造 X-Real-IP 绕过限速）
+$ip = client_ip();
 $fk = 'pw|' . $ip;
 list($blocked, $cnt) = rl_check($fk, 8, 600);
 if ($blocked) {

@@ -54,14 +54,17 @@ for i in $(seq 1 15); do
   echo "[entrypoint] waiting for DB ($i/15)..."
   sleep 3
 done
-if [ "$ADMIN_OK" != "1" ]; then
+# ADMIN_OK: 1=本次建号成功, 2=管理员已存在(改过口令,跳过), 0=失败
+# 此前用 != "1" 判断，导致 ADMIN_OK=2（一切正常）时也误报"未能创建管理员"。
+if [ "$ADMIN_OK" = "0" ]; then
   echo "[entrypoint] !! 15 次重试后仍未能创建管理员 —— 容器内可能没有任何可登录账号"
 fi
 
 # 标记安装完成。install.php 只在 .installed 不存在时才放行，
 # 而 Docker 部署路径以前从不写它 —— 结果是安装向导永久暴露，
 # 任何人都能 POST /install.php?step=3 抢注或覆盖管理员（已实测确认）。
-if [ "$ADMIN_OK" = "1" ] && [ ! -f /var/www/html/.installed ]; then
+# ADMIN_OK=1(新建) 或 2(已存在) 都说明有可用管理员 -> 都要确保向导关闭
+if [ "$ADMIN_OK" != "0" ] && [ ! -f /var/www/html/.installed ]; then
   date '+%Y-%m-%d %H:%M:%S' > /var/www/html/.installed
   chown www-data:www-data /var/www/html/.installed 2>/dev/null || true
   chmod 0644 /var/www/html/.installed 2>/dev/null || true

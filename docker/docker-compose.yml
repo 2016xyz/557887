@@ -32,15 +32,17 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - php_payloads:/var/www/html/payloads
-      - php_passwords:/var/www/html/passwords
+      # 与 python 共用同一 payloads 卷：两端的 .pw_changed 标记、RSA 密钥、载荷
+      # 必须互相可见，否则一端改的口令另一端看不到（重启即被重置回 ADMIN_PASSWORD）。
+      - shared_payloads:/var/www/html/payloads
+      - shared_passwords:/var/www/html/passwords
     environment:
       GIT_TOKEN: ${GIT_TOKEN:-}
       DB_HOST: db
       DB_PORT: "3306"
       DB_NAME: jasmin_db
       DB_USER: jasminadmin
-      DB_PASS: jasmin_secure_pw
+      DB_PASS: ${MYSQL_PASSWORD:-jasmin_secure_pw}
       HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
     ports:
       - "8080:80"
@@ -55,20 +57,22 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - py_payloads:/app/payloads
+      - shared_payloads:/app/payloads
     environment:
       GIT_TOKEN: ${GIT_TOKEN:-}
       DB_HOST: db
       DB_PORT: "3306"
       DB_NAME: jasmin_db
       DB_USER: jasminadmin
-      DB_PASS: jasmin_secure_pw
+      DB_PASS: ${MYSQL_PASSWORD:-jasmin_secure_pw}
       HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
+      # 多副本时若不提供同一 SECRET_KEY，各副本会各自随机生成 -> 会话签名互不兼容。
+      # entrypoint 在未设置时从共享环境变量确定性派生，故此处留空亦可。
+      SECRET_KEY: ${SECRET_KEY:-}
     ports:
       - "5000:5000"
 
 volumes:
   mysql_data:
-  php_payloads:
-  php_passwords:
-  py_payloads:
+  shared_payloads:   # php 与 python 共用（密钥 + 载荷 + .pw_changed 标记）
+  shared_passwords:

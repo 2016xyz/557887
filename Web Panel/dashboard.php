@@ -56,7 +56,10 @@ $csrf = csrf_token();
   <a href="#settings" class="nav-item" onclick="showTab('settings')"><i class="fas fa-user-cog"></i><span>账户设置</span></a>
   <div class="sidebar-foot">
     <span class="user-badge"><i class="fas fa-user-shield"></i> <?=h($_SESSION['username'])?></span>
-    <a href="logout.php"><i class="fas fa-sign-out-alt"></i> 退出</a>
+    <form method="post" action="logout.php" id="logout-form" style="display:inline">
+      <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+      <a href="#" onclick="event.preventDefault();document.getElementById('logout-form').submit();"><i class="fas fa-sign-out-alt"></i> 退出</a>
+    </form>
   </div>
 </nav>
 <button class="hamburger" id="ham" onclick="document.getElementById('sidebar').classList.toggle('open')"><i class="fas fa-bars"></i></button>
@@ -553,7 +556,7 @@ function submitPassword(){
         r.innerHTML='<span style="color:#10b981"><i class="fas fa-check-circle"></i> '+j.msg+'</span>';
         ['pw-cur','pw-new','pw-new2'].forEach(function(id){document.getElementById(id).value='';});
         pwStrength();
-        setTimeout(function(){location.href='logout.php';},2000);
+        setTimeout(function(){document.getElementById('logout-form').submit();},2000);
       }else{
         r.innerHTML='<span style="color:#ef4444"><i class="fas fa-times-circle"></i> '+j.msg+'</span>';
       }

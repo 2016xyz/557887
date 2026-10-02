@@ -3,7 +3,7 @@
 CFG=/app/config.json
 if [ ! -f "$CFG" ]; then
 python3 <<'PY'
-import json, os, secrets
+import json, os, secrets, hashlib
 u = os.environ.get('DB_USER', 'jasminadmin')
 p = os.environ.get('DB_PASS', '')
 from urllib.parse import quote_plus
@@ -15,7 +15,14 @@ cfg = {
     'handshake_secret': os.environ.get('HANDSHAKE_SECRET', 'jasmin@123'),
     'installed': True,
     # SECRET_KEY 必须每个部署各自随机 —— 镜像里写死的密钥等于公开的会话签名密钥
-    'secret_key': secrets.token_hex(32),
+    # ★ 多副本一致性：此前无条件 token_hex(32) 随机生成，而 config.json 不在任何
+    #   共享卷里 -> replicas>=2 时每个副本的会话签名密钥都不同，nginx least_conn
+    #   轮询下签名 Cookie/CSRF 校验随机失效、随机掉登录（Redis session 也救不了
+    #   签名）。这里：优先 SECRET_KEY 环境变量；未设置则从各副本共享的环境变量
+    #   （HANDSHAKE_SECRET + DB_PASS）确定性派生同一个值。
+    'secret_key': (os.environ.get('SECRET_KEY') or hashlib.sha256(
+        ('jasmin|' + os.environ.get('HANDSHAKE_SECRET','') + '|' + os.environ.get('DB_PASS','')).encode()
+    ).hexdigest()),
     'redis_host': os.environ.get('REDIS_HOST', ''),
     'redis_port': int(os.environ.get('REDIS_PORT', '6379')),
 }

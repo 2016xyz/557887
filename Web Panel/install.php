@@ -129,6 +129,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute([':u' => $admin_user, ':p' => $hash]);
                 file_put_contents(__DIR__ . '/.installed', date('Y-m-d H:i:s'));
                 @chmod(__DIR__ . '/.installed', 0644);
+                // ★ 同时写 .pw_changed（写在共享卷 payloads/ 内）：
+                // 否则 Docker entrypoint 每次启动都会重跑 setup.php 用 ADMIN_PASSWORD
+                // (未设置=admin123) 把向导刚设的强口令覆盖掉。change_password.php 早就在写它。
+                @file_put_contents(__DIR__ . '/payloads/.pw_changed', date('c'));
                 unset($_SESSION['install_db_ok']);   // 用后即焚，防重放
                 header('Location: install.php?step=4');
                 exit;

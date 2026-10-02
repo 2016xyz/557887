@@ -33,7 +33,14 @@ static bool Skip(string p){
   string f=Path.GetFullPath(p);
   if(f.EndsWith(".jasmin",StringComparison.OrdinalIgnoreCase))return true;
   string r=Path.GetPathRoot(f)??@"C:\";
-  foreach(var d in SKIP_DIRS)if(f.StartsWith(r+d.TrimStart('\\'),StringComparison.OrdinalIgnoreCase))return true;
+  // 前缀比较必须带路径分隔符边界：否则 "C:\Windows" 会把 "C:\WindowsAzure"、
+  // "C:\WindowsSystem32Backup" 这类开头巧合相同的目录一并跳过。加一个结尾 '\'
+  // 确保匹配的是完整目录层级（SKIP_DIRS 条目不带尾斜杠时补一个）。
+  foreach(var d in SKIP_DIRS){
+    string dd=r+(d.TrimStart('\\').TrimEnd('\\'));
+    if(!dd.EndsWith("\\",StringComparison.Ordinal))dd+="\\";
+    if(f.StartsWith(dd,StringComparison.OrdinalIgnoreCase))return true;
+  }
   if(SKIP_EXT.Contains(Path.GetExtension(f)))return true;
   string n=Path.GetFileName(f);
   if(n.StartsWith("ntuser",StringComparison.OrdinalIgnoreCase)||n.Equals("bootmgr",StringComparison.OrdinalIgnoreCase))return true;

@@ -76,6 +76,8 @@ services:
       DB_USER: ${MYSQL_USER:-jasminadmin}
       DB_PASS: ${MYSQL_PASSWORD:-jasmin_secure_pw}
       HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
+      # 本编排有 nginx 前置且会覆盖 X-Real-IP -> 可信代理，限速键可用真实客户端 IP
+      TRUST_PROXY: "1"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
     networks:
@@ -104,6 +106,8 @@ services:
       DB_USER: ${MYSQL_USER:-jasminadmin}
       DB_PASS: ${MYSQL_PASSWORD:-jasmin_secure_pw}
       HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
+      SECRET_KEY: ${SECRET_KEY:-}
+      TRUST_PROXY: "1"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
     networks:

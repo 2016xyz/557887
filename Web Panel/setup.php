@@ -19,19 +19,25 @@ $hash = password_hash($password, PASSWORD_BCRYPT);
 
 require_once __DIR__ . '/database/db_conection.php';
 
-// 更新或插入默认管理员
-$stmt = $pdo->prepare('SELECT id FROM master WHERE admin = :admin');
-$stmt->execute([':admin' => 'admin']);
-
-if ($stmt->fetch()) {
-    $update = $pdo->prepare('UPDATE master SET creds = :creds WHERE admin = :admin');
-    $update->execute([':creds' => $hash, ':admin' => 'admin']);
-    echo "Admin password updated.\n";
-} else {
-    $insert = $pdo->prepare('INSERT INTO master (admin, creds) VALUES (:admin, :creds)');
-    $insert->execute([':admin' => 'admin', ':creds' => $hash]);
-    echo "Admin user created.\n";
+// ★ 只在【库中尚无任何管理员】时创建 admin。
+// 此前无论是否存在都 upsert 字面量 'admin'：而安装向导 install.php 允许自选
+// 管理员名 —— 一旦向导用了别的名字，容器每次重建都会凭空多出一个
+// admin/ADMIN_PASSWORD(未设置时=admin123) 的第二账号，等于已知口令后门。
+// 改为"表为空才建"，容器重建不再新增/覆盖任何账号。
+// （管理员在后台改过口令时，entrypoint 已通过 payloads/.pw_changed 提前跳过本脚本。）
+try {
+    $n = (int)$pdo->query('SELECT COUNT(*) FROM master')->fetchColumn();
+} catch (PDOException $e) {
+    // master 表尚未建好 -> 以非零退出，让 entrypoint 的重试循环继续等待
+    fwrite(STDERR, "master table not ready: " . $e->getMessage() . "\n");
+    exit(1);
+}
+if ($n > 0) {
+    echo "master 已有管理员，跳过建号（不覆盖、不新增）。\n";
+    exit(0);
 }
 
-echo "Hash: $hash\n";
+$insert = $pdo->prepare('INSERT INTO master (admin, creds) VALUES (:admin, :creds)');
+$insert->execute([':admin' => 'admin', ':creds' => $hash]);
+echo "Admin user created.\n";
 echo "Done.\n";

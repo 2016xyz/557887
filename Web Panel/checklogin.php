@@ -19,8 +19,8 @@ if (!csrf_verify()) {
 
 // 登录频率限制：同 IP + 同账号，5 分钟内最多 10 次失败。
 // 存在共享文件里而非 $_SESSION —— 后者丢 cookie 就能绕过。
-$ip = $_SERVER['HTTP_X_REAL_IP'] ?? '';
-if ($ip === '') { $xf = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? ''; $ip = $xf !== '' ? trim(explode(',', $xf)[0]) : ($_SERVER['REMOTE_ADDR'] ?? ''); }
+// 默认用 REMOTE_ADDR；仅 TRUST_PROXY=1 时才采信代理头（防伪造 X-Real-IP 绕过限速）
+$ip = client_ip();
 $is_str = function ($k) { return isset($_POST[$k]) && is_string($_POST[$k]); };
 $username = $is_str('username') ? trim($_POST['username']) : '';
 $password = $is_str('password') ? $_POST['password'] : '';   // 传数组会让 password_verify 抛 TypeError 500

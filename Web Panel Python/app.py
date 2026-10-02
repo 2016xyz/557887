@@ -233,10 +233,20 @@ def install():
                 au = request.form.get('admin_user','admin')
                 ap_ = request.form.get('admin_pass','')
                 ap2 = request.form.get('admin_pass2','')
-                if len(ap_) < 6:
-                    error = '密码至少6位'
+                # 口令/用户名策略必须与 PHP 侧 install.php:117-122 一致：
+                # 此前这里只校验 len<6 且【完全不校验用户名】，而两面板共用同一张
+                # master 表 —— 等于可以从 Python 侧建出一个 6 位弱口令、
+                # 或含空格/引号等怪用户名的管理员，绕过 PHP 侧更严的准入。
+                if not re.fullmatch(r'[A-Za-z0-9_.\-]{1,64}', au or ''):
+                    error = '用户名只能包含字母、数字、下划线、点、连字符（1-64 位）'
+                elif len(ap_) < 8:
+                    error = '密码至少8位'
+                elif len(ap_.encode('utf-8')) > 72:
+                    error = '密码过长（最长 72 字节）'
                 elif ap_ != ap2:
                     error = '两次密码不一致'
+                elif sum(bool(re.search(p, ap_)) for p in (r'[a-z]', r'[A-Z]', r'[0-9]', r'[^a-zA-Z0-9]')) < 2:
+                    error = '密码需包含小写字母、大写字母、数字、符号中的至少两类'
                 else:
                     with app.app_context():
                         Admin.query.filter_by(username=au).delete()
@@ -295,8 +305,11 @@ def login():
         flash('Access Denied','error')
     return render_template('login.html')
 
-@app.route('/logout')
+@app.route('/logout', methods=['POST'])
 def logout():
+    # 仅 POST + CSRF：防止 <img src="/logout"> 之类的强制登出（登出 CSRF）
+    if not csrf_ok():
+        return 'CSRF 校验失败', 403
     session.clear()
     return redirect(url_for('login'))
 

@@ -46,4 +46,26 @@ if (!function_exists('in_str')) {
     function post_int(string $key, int $default = 0): int {
         return in_int($_POST, $key, $default);
     }
+
+    /**
+     * 解析客户端 IP（用于频率限制键）。
+     *
+     * ★ 默认【不信任】任何代理头，直接用 REMOTE_ADDR。
+     *   X-Real-IP / X-Forwarded-For 都是客户端可随手伪造的：若直接采信，
+     *   攻击者每个请求换一个假 IP 就能拿到一个全新的限速桶 —— 登录/改密
+     *   的爆破频率限制形同虚设（单机 compose 里 php 直接 8080 暴露，更是如此）。
+     *
+     * 仅当显式设置环境变量 TRUST_PROXY=1（确实部署在可信反代/nginx 之后，
+     * 且该反代会覆盖这两个头）时才采信代理头。
+     */
+    function client_ip(): string {
+        $trust = getenv('TRUST_PROXY');
+        if ($trust !== false && $trust !== '' && $trust !== '0') {
+            $rip = $_SERVER['HTTP_X_REAL_IP'] ?? '';
+            if (is_string($rip) && $rip !== '') return $rip;
+            $xff = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
+            if (is_string($xff) && $xff !== '') return trim(explode(',', $xff)[0]);
+        }
+        return $_SERVER['REMOTE_ADDR'] ?? '';
+    }
 }

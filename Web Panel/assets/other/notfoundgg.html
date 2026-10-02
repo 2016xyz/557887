@@ -1,11 +1,8 @@
 <!DOCTYPE html>
-<?php
-
-session_start();
-if( !isset($_SESSION['username']) ){
-	header("Location: /../dashboard.php");
-}
-?>
+<!-- 说明：本文件以 .html 提供，PHP 不会执行。原先内嵌的 session_start()/header()
+     鉴权块有两个问题：(1) 静态 .html 下 PHP 源码会原样泄露给访问者、鉴权完全失效；
+     (2) 跳转逻辑反向(未登录却跳 dashboard)且路径 /../dashboard.php 无效。
+     本页未被任何代码引用，直接移除该破损块，作为静态 404 页使用。 -->
 <html lang="en" >
 <head>
   <meta charset="UTF-8">
