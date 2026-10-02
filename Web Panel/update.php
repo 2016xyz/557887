@@ -92,6 +92,18 @@ function do_update() {
     $za = new ZipArchive();
     if ($za->open($tmp) !== true) { echo json_encode(['ok'=>false,'msg'=>'解压失败']); return; }
     $extract_dir = sys_get_temp_dir() . '/jasmin_update_' . uniqid();
+    // zip-slip 防护：逐成员校验规范化后的路径必须仍位于 $extract_dir 内，
+    // 拒绝含 ../ 的条目或绝对路径。此 zip 下载自私有源本应可信，但若 token
+    // 泄露/源被投毒，恶意的 member 名可用 '..' 把文件写到部署目录之外。
+    $real_extract = realpath($extract_dir);
+    for ($i = 0; $i < $za->numFiles; $i++) {
+        $name = $za->getNameIndex($i);
+        $norm = realpath($extract_dir . '/' . str_replace('\\', '/', $name));
+        if ($norm === false || strpos($norm, $real_extract . '/') !== 0) {
+            $za->close(); @unlink($tmp); @rmdir($extract_dir);
+            echo json_encode(['ok'=>false,'msg'=>'更新包含非法路径，已拒绝']); return;
+        }
+    }
     $za->extractTo($extract_dir);
     $za->close(); unlink($tmp);
     $dirs = glob($extract_dir . '/*', GLOB_ONLYDIR);

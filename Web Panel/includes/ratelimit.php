@@ -111,7 +111,10 @@ function rl_hit(string $key, int $max = 10, int $window = 300): array {
             $u->execute([':i' => $id, ':h' => json_encode($data)]);
             $pdo->commit();
             $cnt = count($data);
-            return [$cnt > $max, $cnt];
+            // 与 rl_check 的 >= 语义一致：第 $max 次即判超限。
+            // 此前 rl_check 用 >= 而 rl_hit 用 >，两函数临界点不一致，
+            // 依赖 rl_hit 返回值的调用方会在第 $max 次失败时不判超限。
+            return [$cnt >= $max, $cnt];
         } catch (PDOException $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             error_log('ratelimit: DB 写入失败，回退文件: ' . $e->getMessage());
@@ -127,7 +130,7 @@ function rl_hit(string $key, int $max = 10, int $window = 300): array {
     @ftruncate($fh, 0); @rewind($fh);
     @fwrite($fh, json_encode($data)); @fflush($fh);
     @flock($fh, LOCK_UN); @fclose($fh);
-    return [$cnt > $max, $cnt];
+    return [$cnt >= $max, $cnt];
 }
 
 function rl_reset(string $key): void {

@@ -80,9 +80,10 @@ decrypt_one(){
     CT_LEN=$((EK_START - 32))
     [ "$CT_LEN" -ge 16 ] || return 1
 
-    # 切分: 头部摘要 / 密文 / RSA块（用 tail+head 高效定位，避免 dd bs=1 逐字节）
+    # 切分: 头部摘要 / RSA块（均很小）落到临时区。密文【不落盘】——
+    # 直接从原文件第33字节起流式读取并喂给 AES，避免把完整密文写进 /tmp
+    # （ESXi 的 /tmp 是小型 RAM disk，VMDK 等大文件会 ENOSPC）。
     head -c 32 "$F" > "$TD/hash"
-    tail -c "+33" "$F" | head -c "$CT_LEN" > "$TD/ct"
     tail -c "+$((EK_START + 1))" "$F" | head -c "$EK_LEN" > "$TD/ek"
 
     # RSA-OAEP 解出 key(32B)+iv(16B)
@@ -103,23 +104,32 @@ decrypt_one(){
     [ -n "$KH" ] || return 1
     [ -n "$IH" ] || return 1
 
-    # AES-256-CBC 解密（openssl 自动去除 PKCS7 padding）
-    if ! openssl enc -d -aes-256-cbc -nosalt \
-            -in "$TD/ct" -out "$TD/plain" \
-            -K "$KH" -iv "$IH" 2>/dev/null; then
+    OUT=$(printf '%s' "$F" | sed 's/\.jasmin$//')
+
+    # AES-256-CBC 流式解密，明文【直接写目标文件】而非先落 /tmp 再 mv：
+    # 旧实现把完整明文写到 $TD/plain（/tmp），ESXi 的 /tmp 是小型 RAM disk，
+    # VMDK 等大文件必然 ENOSPC -> 即便密钥正确也永久无法恢复。
+    # 现在密文与明文都不落 /tmp：tail -c +33 直接从原文件流式吐密文给 openssl，
+    # openssl 边解边经 tee 落盘并同步算 SHA256，全程 O(1) 额外空间。
+    # 注意：SHA 是对【明文】的摘要，必须边解密边算；tee 的同时 stdin 原样传给
+    # sha256sum，两路互不干扰。
+    if ! { tail -c "+33" "$F" | head -c "$CT_LEN" \
+          | openssl enc -d -aes-256-cbc -nosalt \
+            -K "$KH" -iv "$IH" 2>/dev/null \
+          | tee "$OUT" \
+          | openssl dgst -sha256 -binary > "$TD/nh"; } then
+        rm -f "$OUT"
         return 1
     fi
 
     # SHA256 完整性校验
     OH=$(od -An -tx1 -v "$TD/hash" | tr -d ' \n')
-    NH=$(openssl dgst -sha256 -binary "$TD/plain" | od -An -tx1 -v | tr -d ' \n')
+    NH=$(od -An -tx1 -v "$TD/nh" | tr -d ' \n')
     if [ "$OH" != "$NH" ]; then
+        rm -f "$OUT"
         echo "[!] INTEGRITY FAIL: $F"
         return 1
     fi
-
-    OUT=$(printf '%s' "$F" | sed 's/\.jasmin$//')
-    mv -f "$TD/plain" "$OUT" || return 1
     # 明文是先落到 /tmp 再 mv 过来的，mode 由 umask 决定（通常 0644）。
     # 加密时没有保存原始权限位，无法完整还原；但对明确敏感的文件名收紧到 0600，
     # 避免 .env / 私钥 / 口令 这类文件在还原后变成同机其他用户可读。

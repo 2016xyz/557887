@@ -31,15 +31,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pass = post_str('db_pass');
         $secret = trim(post_str('secret', 'jasmin@123'));
         // 主机/端口同样会拼进 DSN，且 .env 会被后续流程复用
-        if (!preg_match('/^[A-Za-z0-9._\-]{1,255}$/', $host)) {
-            throw new RuntimeException('数据库主机名格式不合法');
+        // 注意：这三处校验位于 try 块(第43行)之前，若用 throw 抛 RuntimeException
+        // 将不被下方 catch 捕获，非法输入直接未捕获异常 -> HTTP 500 而非友好报错。
+        // 因此改为赋值 $error 并跳过执行，与 try 内失败的呈现保持一致。
+        if (!preg_match('/^[A-Za-z0-9._\\-]{1,255}$/', $host)) {
+            $error = '数据库主机名格式不合法';
         }
-        if (!preg_match('/^\d{1,5}$/', $port) || (int)$port < 1 || (int)$port > 65535) {
-            throw new RuntimeException('数据库端口不合法');
+        elseif (!preg_match('/^\\d{1,5}$/', $port) || (int)$port < 1 || (int)$port > 65535) {
+            $error = '数据库端口不合法';
         }
-        if (!preg_match('/^[A-Za-z0-9_\-@.!$%&*+=]{1,64}$/', $secret)) {
-            throw new RuntimeException('握手密钥只能包含字母、数字及 - _ @ . ! $ % & * + = （不能有引号/反斜杠/空格）');
+        elseif (!preg_match('/^[A-Za-z0-9_\\-@.!$%&*+=]{1,64}$/', $secret)) {
+            $error = '握手密钥只能包含字母、数字及 - _ @ . ! $ % & * + = （不能有引号/反斜杠/空格）';
         }
+        if (!$error) {
         try {
             $dsn = "mysql:host={$host};port={$port};charset=utf8mb4";
             $pdo = new PDO($dsn, $user, $pass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
@@ -97,6 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } catch (RuntimeException $e) {
             $error = $e->getMessage();
         }
+        }  // 闭合 if (!$error)
     }
     elseif ($step === 3) {
         // 必须先由「本会话」完成第 2 步（数据库配置）。
