@@ -24,9 +24,10 @@ $ErrorActionPreference = 'Stop'
 $Server = $Server.TrimEnd('/')
 
 # 从网页复制 K 常带换行/空格（Windows 剪贴板还会带 CR/LF）。
-# sh 版 (jasmin_unlock.sh) 早已剥掉这些，ps1 版此前没有 —— 粘错就报
-# "K passphrase should be 32 hex chars"，与真实原因（复制噪声）不符。补齐一致性。
-$K = $K.Trim()
+# 必须与 sh 版 jasmin_unlock.sh:27 的 `tr -d ' \t\r\n'` 完全一致 —— 剥掉【所有】
+# 空白（含中间），只 .Trim() 首尾对含内部空格/换行的口令仍会误报
+# "K passphrase should be 32 hex chars"，把复制噪声说成密钥错误。
+$K = ($K -replace '\s', '')
 
 if ($K.Length -ne 32) {
     Write-Host "[!] K passphrase should be 32 hex chars, got $($K.Length)" -ForegroundColor Red
@@ -111,16 +112,28 @@ try {
                 # 与真实原因无关的 .NET 堆栈。同样地本版此前缺 128 的下界
                 # （sh 版有），ekLen=0 会退化成非法切片后才靠异常兜底。
                 $ekLen = [BitConverter]::ToUInt32($b, $b.Length - 4)
-                if ($ekLen -lt 128 -or $ekLen -gt 512 -or $ekLen -gt ($b.Length - 36)) {
+                if ($ekLen -lt 128 -or $ekLen -gt 512) {
                     throw "Abnormal RSA key block length ($ekLen)"
                 }
+                # ★ 先算 $ekOff 再校验它是否 > 32，不能只校验 ekLen 上界：
+                #   PowerShell 的 $b[32..31] 是【降序区间】，会返回反向的 2 字节切片
+                #   而不是空数组（pwsh 实测 $c[3..2] => 长度 2、值 3,2）。
+                #   若 $ekOff 退到 32，$b[32..($ekOff-1)] 就是这种非法切片，
+                #   报错会错位到 AES 阶段，注释宣称的 "Abnormal..." 永不出现。
                 $ekOff = $b.Length - 4 - [int]$ekLen
+                if ($ekOff -le 32) {
+                    throw "Abnormal file layout (RSA block offset $ekOff <= 32)"
+                }
 
                 $sha   = [byte[]]$b[0..31]
                 $cblob = [byte[]]$b[32..($ekOff - 1)]
                 $ek    = [byte[]]$b[$ekOff..($b.Length - 5)]
 
                 $km  = $rsa.Decrypt($ek, [System.Security.Cryptography.RSAEncryptionPadding]::OaepSHA256)
+                # 与 sh 版 decrypt_openssl.sh 的 `-eq 48` 一致：不校验的话，
+                # 异钥/损坏时下面的切片会静默截断，最终以 Aes.Key/IV setter 异常暴露，
+                # 报错与真实原因不符。
+                if ($km.Length -ne 48) { throw "Unexpected key material length ($($km.Length)), expected 48" }
                 $key = [byte[]]$km[0..31]
                 $aiv = [byte[]]$km[32..47]
 

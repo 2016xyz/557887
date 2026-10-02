@@ -89,12 +89,17 @@ echo ""
 
 # ── 6. 目标数据量 ──
 echo "──── 6. Target data size (determines extra space needed) ────"
+# 载荷只加密白名单扩展名内的文件，所以 inode 需求要按白名单统计。
+# 此前用 `find -type f | wc -l` 统计【全部】文件并宣称"需要 n 个 inode"，
+# 会把图片/源码/缓存等永远不会被加密的文件也算进去，显著高估、误导容量规划。
+EXTS_RE='^(ppt|pptx|doc|docx|xls|xlsx|pdf|txt|csv|rtf|odt|ods|md|jpg|jpeg|png|gif|bmp|tif|tiff|heic|webp|raw|mp3|flac|wav|m4a|mp4|mov|avi|mkv|sql|bak|html|php|py|java|json|xml|zip|rar|7z)$'
 for d in $DIRS; do
     [ -d "$d" ] || continue
-    n=$(find "$d" -type f 2>/dev/null | wc -l)
+    tot=$(find "$d" -type f 2>/dev/null | wc -l)
+    n=$(find "$d" -type f 2>/dev/null | awk -F. -v re="$EXTS_RE" 'tolower($NF) ~ re' | wc -l)
     s=$(du -sh "$d" 2>/dev/null | awk '{print $1}')
-    echo "  $d: $n files, $s total"
-    echo "      -> encryption needs about $s free space and $n inodes"
+    echo "  $d: $tot files total ($n match encryption targets), $s total"
+    echo "      -> encryption needs about $s free space and ~$n inodes (only target extensions are encrypted)"
 done
 echo ""
 

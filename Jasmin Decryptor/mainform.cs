@@ -108,7 +108,10 @@ namespace Jasmin_Decryptor
             {
                 try
                 {
-                    if (d.Name == @"C:\") continue;
+                    // 不再跳过 C:：加密器 (Jasmin Encrypter/Program.cs) 遍历的是
+                    // DriveInfo.GetDrives() 且包含 C: —— 解密器跳过 C: 会导致 C 盘上
+                    // 绝大多数用户文件永远解不回来，keyverify 还会因跳过 C: 而误报
+                    // "not found"。系统目录由 SkipRules 保护，这里只找 *.jasmin。
                     foreach (string dir in Directory.EnumerateDirectories(d.Name))
                         try { foreach (string f in Directory.EnumerateFiles(dir, ext, SearchOption.AllDirectories))
                             try { return TestDecrypt(f, pem); } catch { continue; }
@@ -165,7 +168,10 @@ namespace Jasmin_Decryptor
             {
                 try
                 {
-                    if (d.Name == @"C:\") continue;
+                    // 不再跳过 C:：加密器 (Jasmin Encrypter/Program.cs) 遍历的是
+                    // DriveInfo.GetDrives() 且包含 C: —— 解密器跳过 C: 会导致 C 盘上
+                    // 绝大多数用户文件永远解不回来，keyverify 还会因跳过 C: 而误报
+                    // "not found"。系统目录由 SkipRules 保护，这里只找 *.jasmin。
                     foreach (string dir in Directory.EnumerateDirectories(d.Name))
                         try { foreach (string f in Directory.EnumerateFiles(dir, ext, SearchOption.AllDirectories))
                             try { ProcessFile(f); } catch { } } catch { }
@@ -219,7 +225,10 @@ namespace Jasmin_Decryptor
             {
                 try
                 {
-                    if (d.Name == @"C:\") continue;
+                    // 不再跳过 C:：加密器 (Jasmin Encrypter/Program.cs) 遍历的是
+                    // DriveInfo.GetDrives() 且包含 C: —— 解密器跳过 C: 会导致 C 盘上
+                    // 绝大多数用户文件永远解不回来，keyverify 还会因跳过 C: 而误报
+                    // "not found"。系统目录由 SkipRules 保护，这里只找 *.jasmin。
                     foreach (string dir in Directory.EnumerateDirectories(d.Name))
                         try { foreach (string f in Directory.EnumerateFiles(dir, ext, SearchOption.AllDirectories))
                             try { count++; } catch { } } catch { }

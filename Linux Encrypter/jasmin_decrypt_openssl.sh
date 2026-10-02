@@ -130,7 +130,7 @@ decrypt_one(){
         echo "[!] INTEGRITY FAIL: $F"
         return 1
     fi
-    # 明文是先落到 /tmp 再 mv 过来的，mode 由 umask 决定（通常 0644）。
+    # 明文是流式 tee 直接写到目标文件的（不再经 /tmp 中转），mode 由 umask 决定。
     # 加密时没有保存原始权限位，无法完整还原；但对明确敏感的文件名收紧到 0600，
     # 避免 .env / 私钥 / 口令 这类文件在还原后变成同机其他用户可读。
     case "${OUT##*/}" in

