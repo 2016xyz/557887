@@ -27,7 +27,7 @@ cfg = {
     'redis_port': int(os.environ.get('REDIS_PORT', '6379')),
 }
 open('/app/config.json', 'w').write(json.dumps(cfg))
-print('[entrypoint] config.json created (secret_key 随机生成)')
+print('[entrypoint] config.json created (secret_key 由 SECRET_KEY 环境变量或确定性派生)')
 PY
 fi
 

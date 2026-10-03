@@ -43,13 +43,12 @@ $date           = $cap(post_str('date'),            90);
 $time           = $cap(post_str('time'),            20);   // 用于 strtotime + time 列
 $systemid       = $cap(post_str('systemid'),       200);
 $location       = $cap(post_str('location'),       200);
-// IP 取服务端可见的真实来源：nginx 已设 X-Forwarded-For，
-// 上报值可被被控端随意伪造，取证上不可信。
-$_xff = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
-$_rip = $_SERVER['HTTP_X_REAL_IP'] ?? '';
-if ($_rip !== '')                $ip = $_rip;
-elseif ($_xff !== '')            $ip = trim(explode(',', $_xff)[0]);
-else                             $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+// IP 取服务端可见的真实来源，但必须走 client_ip()：
+// 代理头只有【确实在可信反代之后】才可信。单机 compose 没有 nginx
+// （php 直接暴露 8080），此时无条件采信 X-Real-IP 会让任何持有握手密钥的
+// 人把受害者 IP 伪造成任意值（面板展示的 IP 是取证依据）。client_ip() 默认
+// 用 REMOTE_ADDR，仅 TRUST_PROXY=1（集群编排注入）时才采信代理头。
+$ip = client_ip();
 // ip 列是 varchar(45)，但上面的取值没走 $cap —— 超长头会让 INSERT 报
 // Data too long 并被 catch 成 400，把一次正常上报打掉。
 $ip = substr($ip, 0, 45);

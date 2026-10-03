@@ -92,14 +92,34 @@ function do_update() {
     $za = new ZipArchive();
     if ($za->open($tmp) !== true) { echo json_encode(['ok'=>false,'msg'=>'解压失败']); return; }
     $extract_dir = sys_get_temp_dir() . '/jasmin_update_' . uniqid();
+    if (!is_dir($extract_dir) && !mkdir($extract_dir, 0700, true)) {
+        $za->close(); @unlink($tmp);
+        echo json_encode(['ok'=>false,'msg'=>'无法创建临时目录']); return;
+    }
     // zip-slip 防护：逐成员校验规范化后的路径必须仍位于 $extract_dir 内，
     // 拒绝含 ../ 的条目或绝对路径。此 zip 下载自私有源本应可信，但若 token
     // 泄露/源被投毒，恶意的 member 名可用 '..' 把文件写到部署目录之外。
+    // ★ 此前用 realpath 校验 —— 但 extractTo 之前成员文件根本不存在，
+    //   realpath 对不存在的路径一律返回 false，导致【每个】成员都被判
+    //   "非法路径"而拒绝，zip 更新方式永远失败（实测 PHP 8.0）。
+    //   realpath 只用于锚定 extract_dir 本身；成员用纯字符串规范化。
     $real_extract = realpath($extract_dir);
+    if ($real_extract === false) { $real_extract = $extract_dir; }
+    $real_extract = rtrim($real_extract, '/') . '/';
     for ($i = 0; $i < $za->numFiles; $i++) {
         $name = $za->getNameIndex($i);
-        $norm = realpath($extract_dir . '/' . str_replace('\\', '/', $name));
-        if ($norm === false || strpos($norm, $real_extract . '/') !== 0) {
+        $flat = str_replace('\\', '/', $name);
+        // 逐段规范化（不解析符号链接——extractTo 到全新目录，无链接可被利用）
+        $parts = [];
+        foreach (explode('/', $flat) as $seg) {
+            if ($seg === '' || $seg === '.') continue;
+            if ($seg === '..') { $za->close(); @unlink($tmp); @rmdir($extract_dir);
+                echo json_encode(['ok'=>false,'msg'=>'更新包含非法路径，已拒绝']); return; }
+            $parts[] = $seg;
+        }
+        if (!$parts) continue; // 纯目录条目
+        $norm = $real_extract . implode('/', $parts);
+        if (strpos($norm, $real_extract) !== 0) {
             $za->close(); @unlink($tmp); @rmdir($extract_dir);
             echo json_encode(['ok'=>false,'msg'=>'更新包含非法路径，已拒绝']); return;
         }
@@ -111,10 +131,20 @@ function do_update() {
         $src = $dirs[0] . '/Web Panel';
         if (is_dir($src)) {
             // 覆盖但保留 .env .installed passwords/ payloads/
-            shell_exec("rsync -a --exclude='.env' --exclude='.installed' --exclude='passwords' --exclude='payloads' " 
+            // ★ 此前不检查 rsync 结果 —— rsync 缺失/失败时仍报"更新完成"，
+            //   实际一个文件都没换。rsync 输出留存到 msg 供排查。
+            $out = shell_exec("rsync -a --exclude='.env' --exclude='.installed' --exclude='passwords' --exclude='payloads' "
                 . escapeshellarg($src . '/') . " " . escapeshellarg(__DIR__ . '/') . " 2>&1");
+            $ok = ($out !== null);
+            shell_exec("rm -rf " . escapeshellarg($extract_dir));
+            if ($ok) {
+                echo json_encode(['ok'=>true,'method'=>'zip下载','msg'=>'更新完成，请刷新页面']);
+            } else {
+                echo json_encode(['ok'=>false,'method'=>'zip下载','msg'=>'rsync 执行失败（容器内缺 rsync？）: ' . substr((string)$out,0,200)]);
+            }
+            return;
         }
     }
     shell_exec("rm -rf " . escapeshellarg($extract_dir));
-    echo json_encode(['ok'=>true,'method'=>'zip下载','msg'=>'更新完成，请刷新页面']);
+    echo json_encode(['ok'=>false,'method'=>'zip下载','msg'=>'更新包中未找到 Web Panel 目录']);
 }
