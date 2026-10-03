@@ -89,6 +89,13 @@ function do_update() {
     if (!$zip) { echo json_encode(['ok'=>false,'msg'=>'下载失败，请检查GIT_TOKEN']); return; }
     $tmp = tempnam(sys_get_temp_dir(),'jasmin_') . '.zip';
     file_put_contents($tmp, $zip);
+    // 镜像若未编译 php-zip 扩展, `new ZipArchive()` 会抛 Error（不是 Exception,
+    // 不被 catch 捕获）→ 直接 500 且把堆栈吐给前端。先显式判断并给出可操作的提示。
+    if (!class_exists('ZipArchive')) {
+        @unlink($tmp);
+        echo json_encode(['ok'=>false,'msg'=>'当前 PHP 缺少 zip 扩展，无法使用 zip 更新方式，请使用 git 部署或安装 php-zip']);
+        return;
+    }
     $za = new ZipArchive();
     if ($za->open($tmp) !== true) { echo json_encode(['ok'=>false,'msg'=>'解压失败']); return; }
     $extract_dir = sys_get_temp_dir() . '/jasmin_update_' . uniqid();
