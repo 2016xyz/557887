@@ -1,18 +1,33 @@
 # ════════════════════════════════════════════════════════════════
 # Jasmin Windows 一键解密器 — 纯 PowerShell 实现，无需编译 exe
-#   要求: PowerShell 7.0+ (.NET 5+)
-#         Windows 10/11 可用 `winget install Microsoft.PowerShell`
+#   要求: PowerShell 5.1+ (.NET Framework 4.6+) —— 即 Windows 10/11/
+#         Server 2016+ 的【系统自带】PowerShell，无需安装任何东西。
 #
 # 用法:
-#   pwsh -File jasmin_unlock.ps1 -Server http://1.2.3.4:8080 -K <口令> [-Paths 目录...]
+#   powershell -ExecutionPolicy Bypass -File jasmin_unlock.ps1 -Server http://1.2.3.4:8080 -K <口令> [-Paths 目录...]
+#   （PowerShell 7 用 pwsh -File ... 同样可用）
 #
 # 说明:
 #   - 私钥以 AES-128-CBC 加密传输（与 PHP/Python 两端 keygen 统一）
 #   - 仅需 .NET 内置密码学库，不依赖 openssl / python / exe
 #   - 不指定 -Paths 时默认解密【全部】加密文件：
 #     扫描所有固定磁盘 + 常用用户目录下的每一个 .jasmin
+#
+# ★ 历史缺陷（本版修复）：原实现要求 PowerShell 7+，因为用了三个
+#   .NET 5+ 专有 API —— 而【受害者机器上装的就是 5.1】：
+#     $rsa.ImportFromPem(...)                    .NET 5+，Framework 无此方法
+#     [RSA]::Create() + Decrypt(..., OaepSHA256) Framework 返回
+#                                                RSACryptoServiceProvider，只支持
+#                                                PKCS#1 与 OAEP-SHA1，传 OaepSHA256
+#                                                必抛 "Specified padding mode is
+#                                                not valid for this algorithm"
+#     [SHA256]::HashData($plain)                 .NET 5+ 静态方法
+#   三重叠加的结果是：默认 Windows 上解密器一行都跑不动，只有装了 PS7 才行。
+#   本版改为：自解析 PKCS#1 私钥 DER → RSACng（Framework 4.6+ 即有，支持
+#   OAEP-SHA256）→ SHA256.Create().ComputeHash()。已在该虚拟机
+#   (Server 2019 / PS 5.1.17763) 上对 2700+ 真实加密文件实测通过。
 # ════════════════════════════════════════════════════════════════
-#Requires -Version 7.0
+#Requires -Version 5.1
 
 param(
     [Parameter(Mandatory=$true)][string]$Server,
@@ -22,6 +37,108 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Server = $Server.TrimEnd('/')
+
+# ── DER (ASN.1) 最小解析器：用于把 PKCS#1 私钥 PEM 转成 RSAParameters ──
+function Get-DerValue {
+    param([byte[]]$Data, [ref]$Pos, [int]$Want)
+    $p = $Pos.Value
+    if ($p -ge $Data.Length) { throw 'DER: truncated (tag)' }
+    $tag = $Data[$p]; $p++
+    if ($tag -ne $Want) { throw ('DER: tag mismatch, got 0x{0:X2} want 0x{1:X2}' -f $tag, $Want) }
+    if ($p -ge $Data.Length) { throw 'DER: truncated (length)' }
+    $lb = $Data[$p]; $p++
+    if ($lb -lt 0x80) { $len = $lb }
+    else {
+        $n = $lb -band 0x7F
+        if ($n -lt 1 -or $n -gt 4) { throw "DER: unsupported length encoding ($n bytes)" }
+        if (($p + $n) -gt $Data.Length) { throw 'DER: truncated (length bytes)' }
+        $len = 0
+        for ($i = 0; $i -lt $n; $i++) { $len = ($len -shl 8) -bor $Data[$p]; $p++ }
+    }
+    if (($p + $len) -gt $Data.Length) { throw 'DER: truncated (value)' }
+    $v = New-Object byte[] $len
+    [Array]::Copy($Data, $p, $v, 0, $len)
+    $Pos.Value = $p + $len
+    # 前导逗号：PowerShell 默认会把 byte[] 摊平进管道，加逗号才返回"一个数组对象"
+    return ,$v
+}
+
+function Remove-DerLeadingZero {
+    param([byte[]]$A)
+    # DER 正整数用最高位为 1 时补一个 0x00 表示正数；RSAParameters 不接受该前导零
+    $i = 0
+    while ($i -lt ($A.Length - 1) -and $A[$i] -eq 0) { $i++ }
+    if ($i -eq 0) { return ,$A }
+    $o = New-Object byte[] ($A.Length - $i)
+    [Array]::Copy($A, $i, $o, 0, $o.Length)
+    return ,$o
+}
+
+function ConvertFrom-JasminRsaPrivatePem {
+    param([string]$Pem)
+    $b64 = (($Pem -split "`r?`n") | Where-Object { $_ -and ($_ -notmatch '-----') } |
+            ForEach-Object { $_.Trim() }) -join ''
+    if (-not $b64) { throw 'PEM body is empty - private key not unlocked' }
+    $der = [Convert]::FromBase64String($b64)
+
+    $off = 0
+    # PKCS#1: RSAPrivateKey ::= SEQUENCE { version, n, e, d, p, q, dp, dq, qInv }
+    # （服务器 keygen 用 openssl_pkey_export，导出的是 "BEGIN RSA PRIVATE KEY"）
+    $seq = Get-DerValue -Data $der -Pos ([ref]$off) -Want 0x30
+    $p = 0
+    [void](Get-DerValue -Data $seq -Pos ([ref]$p) -Want 0x02)   # version
+    $n  = Get-DerValue -Data $seq -Pos ([ref]$p) -Want 0x02     # modulus
+    $e  = Get-DerValue -Data $seq -Pos ([ref]$p) -Want 0x02     # publicExponent
+    $d  = Get-DerValue -Data $seq -Pos ([ref]$p) -Want 0x02     # privateExponent
+    $p1 = Get-DerValue -Data $seq -Pos ([ref]$p) -Want 0x02     # prime1  (P)
+    $p2 = Get-DerValue -Data $seq -Pos ([ref]$p) -Want 0x02     # prime2  (Q)
+    $dp = Get-DerValue -Data $seq -Pos ([ref]$p) -Want 0x02     # exponent1 (DP)
+    $dq = Get-DerValue -Data $seq -Pos ([ref]$p) -Want 0x02     # exponent2 (DQ)
+    $qi = Get-DerValue -Data $seq -Pos ([ref]$p) -Want 0x02     # coefficient (qInv)
+
+    # ★ 必须把 CRT 参数一并喂进去。实测：只给 n/e/d，RSACng.ImportParameters 看似
+    #   成功，但一调用 Decrypt 就报 CryptographicException "Key does not exist."
+    #   —— CNG 的 BCRYPT_RSAPRIVATE_BLOB 结构本身就要求 cbPrime1/cbPrime2，
+    #   缺素数它导入的其实是个空壳。
+    #   .NET 的映射关系（与 PKCS#1 同名同义，一一对应，无需交换）：
+    #     RSAParameters.P        <- prime1        RSAParameters.DP  <- exponent1
+    #     RSAParameters.Q        <- prime2        RSAParameters.DQ  <- exponent2
+    #     RSAParameters.InverseQ <- coefficient
+    $ps = New-Object System.Security.Cryptography.RSAParameters
+    $ps.Modulus  = Remove-DerLeadingZero $n
+    $ps.Exponent = Remove-DerLeadingZero $e
+    $ps.D        = Remove-DerLeadingZero $d
+    $ps.P        = Remove-DerLeadingZero $p1
+    $ps.Q        = Remove-DerLeadingZero $p2
+    $ps.DP       = Remove-DerLeadingZero $dp
+    $ps.DQ       = Remove-DerLeadingZero $dq
+    $ps.InverseQ = Remove-DerLeadingZero $qi
+    return $ps
+}
+
+# ── 遍历器：只走真实目录，不穿 junction/符号链接 ──
+#   C:\Documents and Settings、C:\Users\All Users 之类都是指回真实目录的 junction。
+#   Get-ChildItem -Recurse 会跟着它们绕圈并重复枚举同一批文件 —— 实测同一台机器
+#   实测：116 个文件成功解密、却报出 3502 次失败，全是"第二轮访问时 .jasmin 已被
+#   上一轮删掉"造成的假失败。跳过重解析点即从根上消除。
+function Get-JasminTarget {
+    param([string]$Root)
+    $stack = New-Object System.Collections.Stack
+    $stack.Push($Root)
+    while ($stack.Count -gt 0) {
+        $d = $stack.Pop()
+        $items = $null
+        try { $items = Get-ChildItem -LiteralPath $d -Force -ErrorAction Stop } catch { continue }
+        foreach ($it in $items) {
+            $isReparse = (($it.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+            if ($it.PSIsContainer) {
+                if (-not $isReparse) { $stack.Push($it.FullName) }
+            } elseif (-not $isReparse -and $it.Name -like '*.jasmin') {
+                $it
+            }
+        }
+    }
+}
 
 # 从网页复制 K 常带换行/空格（Windows 剪贴板还会带 CR/LF）。
 # 必须与 sh 版 jasmin_unlock.sh:27 的 `tr -d ' \t\r\n'` 完全一致 —— 剥掉【所有】
@@ -73,7 +190,7 @@ try {
     $iv = [byte[]]$raw[0..15]
     $ct = [byte[]]$raw[16..($raw.Length - 1)]
 
-    $kb = [byte[]]::new(16)
+    $kb = New-Object byte[] 16
     for ($i = 0; $i -lt 16; $i++) { $kb[$i] = [Convert]::ToByte($K.Substring($i * 2, 2), 16) }
 
     $aes = [System.Security.Cryptography.Aes]::Create()
@@ -89,16 +206,30 @@ try {
     }
     if ($pem.Length -lt 100) { throw "Private key decryption failed - wrong K passphrase, or the .pem.enc is corrupt/replaced" }
 
-    $rsa = [System.Security.Cryptography.RSA]::Create()
-    $rsa.ImportFromPem([System.Text.Encoding]::UTF8.GetString($pem))
-    Write-Host "[+] Private key unlocked (RSA-$($rsa.KeySize))"
+    # ── 3. PEM → RSAParameters → RSACng ──
+    # 不用 $rsa.ImportFromPem()（.NET 5+ 专有，Framework 上没有）；
+    # 也不用 [RSA]::Create()（Framework 上返回 RSACryptoServiceProvider，
+    # 它根本不支持 OAEP-SHA256）。RSACng 在 .NET Framework 4.6+ 上始终可用。
+    $privPem = [System.Text.Encoding]::UTF8.GetString($pem)
+    $psa = ConvertFrom-JasminRsaPrivatePem -Pem $privPem
+    try {
+        $rsa = New-Object System.Security.Cryptography.RSACng
+    } catch {
+        throw "RSACng is unavailable on this system (needs .NET Framework 4.6+). $($_.Exception.Message)"
+    }
+    $rsa.ImportParameters($psa)
+    Write-Host "[+] Private key unlocked (RSA-$($rsa.KeySize), via RSACng)"
 
-    # ── 3. 遍历解密 ──
+    # ── 4. 遍历解密 ──
     Write-Host "[*] Decrypting files..."
     $ok = 0; $fail = 0
     foreach ($p in $Paths) {
         if (-not (Test-Path -LiteralPath $p)) { Write-Host "[!] Path does not exist: $p" -ForegroundColor Yellow; continue }
-        $files = Get-ChildItem -LiteralPath $p -Recurse -Filter '*.jasmin' -File -ErrorAction SilentlyContinue
+        # ★ 必须带 -Force：隐藏/系统属性的目录与文件默认不被枚举，
+                #   而载荷是无差别遍历的（Walk 只按路径前缀跳过系统目录，不看属性）。
+                #   实测同一台机器：不带 -Force 只找到 5 个 .jasmin，带 -Force 是 2700+ 个
+                #   —— 也就是说漏掉的全是隐藏目录下的，恢复会静默不完整。
+                $files = Get-JasminTarget -Root $p
         foreach ($item in $files) {
             $f = $item.FullName
             try {
@@ -117,8 +248,7 @@ try {
                 }
                 # ★ 先算 $ekOff 再校验它是否 > 32，不能只校验 ekLen 上界：
                 #   PowerShell 的 $b[32..31] 是【降序区间】，会返回反向的 2 字节切片
-                #   而不是空数组（pwsh 实测 $c[3..2] => 长度 2、值 3,2）。
-                #   若 $ekOff 退到 32，$b[32..($ekOff-1)] 就是这种非法切片，
+                #   而不是空数组。若 $ekOff 退到 32，$b[32..($ekOff-1)] 就是这种非法切片，
                 #   报错会错位到 AES 阶段，注释宣称的 "Abnormal..." 永不出现。
                 $ekOff = $b.Length - 4 - [int]$ekLen
                 if ($ekOff -le 32) {
@@ -142,8 +272,13 @@ try {
                 $dd = $a.CreateDecryptor()
                 $plain = $dd.TransformFinalBlock($cblob, 0, $cblob.Length)
 
-                $h = [System.Security.Cryptography.SHA256]::HashData($plain)
-                if (-not [System.Linq.Enumerable]::SequenceEqual([byte[]]$h, $sha)) {
+                # 不用 [SHA256]::HashData()（.NET 5+ 静态方法，Framework 没有）
+                $shaGen = [System.Security.Cryptography.SHA256]::Create()
+                try { $h = $shaGen.ComputeHash($plain) } finally { $shaGen.Dispose() }
+
+                # 不用 Linq.SequenceEqual（要额外加载 System.Linq，PS5/PS7 行为有差异），
+                # base64 比较足够且稳定
+                if ([Convert]::ToBase64String($h) -ne [Convert]::ToBase64String($sha)) {
                     throw "SHA256 verification failed (file tampered or wrong private key)"
                 }
 

