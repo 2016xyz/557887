@@ -4,6 +4,7 @@
  */
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
+require_once __DIR__ . '/includes/platform.php';  // 新增：跨平台支持
 require_auth();
 header('Content-Type: application/json');
 
@@ -52,7 +53,7 @@ openssl_pkey_export($key, $priv);
 $pub = openssl_pkey_get_details($key)['key'];
 
 $dir = __DIR__ . '/payloads';
-if (!is_dir($dir)) mkdir($dir, 0750, true);
+if (!is_dir($dir)) make_directory($dir, 0750, true);
 
 // AES-128-CBC 加密私钥（128 位，密钥 = K 的十六进制解码后的 16 字节）
 $aes_key = bin2hex(random_bytes(16)); // 32 hex chars = 128 bit
@@ -77,19 +78,11 @@ file_put_contents($dir . '/jasmin_private.pem', $priv);  // 后台下载用
 file_put_contents($dir . '/jasmin_public.pem', $pub);
 file_put_contents($dir . '/.key_secret', $aes_key);      // 解密密码
 
-// 权限: 必须让 web 用户读得到 —— 直链已被 .htaccess 拒绝，
-// 私钥/口令仅经「需登录」的 download_file.php 下发。
-// 注意: keygen 可能被 CLI(root) 调用，此时 owner=root 而 Apache 是 www-data，
-//       必须 chown 或放开权限，否则 readfile() 会因权限不足失败。
+// 权限设置：使用跨平台函数
 foreach (['jasmin_private.pem.enc', 'jasmin_public.pem', 'jasmin_private.pem', '.key_secret'] as $f) {
-    $p = $dir . '/' . $f;
-    if (!file_exists($p)) continue;
-    @chown($p, 'www-data');
-    @chgrp($p, 'www-data');
-    @chmod($p, 0640);
-    if (!is_readable($p)) @chmod($p, 0644);   // 兜底
+    set_file_permissions($dir . '/' . $f, 0640);
 }
-@chmod($dir, 0755);
+set_file_permissions($dir, 0755);
 
 echo json_encode([
     'ok'=>true,

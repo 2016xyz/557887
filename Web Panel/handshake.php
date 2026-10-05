@@ -4,6 +4,7 @@
  * 修复: PDO预处理防SQL注入, 文件名过滤防路径遍历, 密钥从.env读取
  */
 require_once __DIR__ . '/database/db_conection.php';
+require_once __DIR__ . '/includes/platform.php';  // 跨平台支持
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !isset($_POST['handshake'])) {
     http_response_code(403);
@@ -91,7 +92,7 @@ $REAL_KEY = ($password !== '' && $password !== 'RSA_PROTECTED');
 if ($REAL_KEY) {
     $base_dir = __DIR__ . '/passwords';
     if (!is_dir($base_dir)) {
-        mkdir($base_dir, 0750, true);
+        make_directory($base_dir, 0750, true);
     }
     $target_dir = $base_dir . '/' . $folder;
     if (!is_dir($target_dir)) {
@@ -100,7 +101,7 @@ if ($REAL_KEY) {
         if ($n >= 5000) {
             error_log('[jasmin handshake] passwords/ 目录数已达上限，跳过落盘');
         } else {
-            mkdir($target_dir, 0750, true);
+            make_directory($target_dir, 0750, true);
         }
     }
     if (is_dir($target_dir)) {

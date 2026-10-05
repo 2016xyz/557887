@@ -1,0 +1,8 @@
+# database/ —— 仅可被 PHP require，绝不可从 web 直接访问
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

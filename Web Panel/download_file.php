@@ -11,6 +11,7 @@
  *       现统一改由本接口鉴权下发，直链仍然保持 403。
  */
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/platform.php';  // 跨平台支持
 require_auth();
 
 $file = str_replace('\\', '/', (string)($_GET['file'] ?? ''));
@@ -26,16 +27,26 @@ if ($root === false) {
     echo 'Server misconfigured.';
     exit;
 }
+// Windows 的 realpath() 返回反斜杠（C:\path\to），必须归一化后再做前缀比较，
+// 否则 strpos($real, $root . '/') 恒不命中 → 所有下载都 404。
+$root = normalize_path($root);
+$rootSlash = rtrim($root, '/') . '/';
 
 // realpath 会归一化 ../ 与多余斜杠；随后必须仍位于 $root 之下
-$real = realpath($root . '/' . $file);
-if ($real === false || strpos($real, $root . '/') !== 0 || !is_file($real)) {
+$real = realpath(normalize_path($rootSlash . $file));
+if ($real === false) {
+    http_response_code(404);
+    echo 'File not found.';
+    exit;
+}
+$real = normalize_path($real);  // Windows: 统一为 / 再做前缀与子串比较
+if (strpos($real, $rootSlash) !== 0 || !is_file($real)) {
     http_response_code(404);
     echo 'File not found.';
     exit;
 }
 
-$rel = substr($real, strlen($root) + 1);   // 例: payloads/jasmin_private.pem
+$rel = substr($real, strlen($rootSlash));   // 例: payloads/jasmin_private.pem
 
 // payloads/ 下只允许密钥文件；生成的载荷/脚本不得经此下载
 $KEY_FILES = [

@@ -3,6 +3,7 @@
  * 检查更新 + 一键自动更新API
  */
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/platform.php';  // 跨平台支持
 require_auth();
 header('Content-Type: application/json');
 
@@ -98,8 +99,8 @@ function do_update() {
     }
     $za = new ZipArchive();
     if ($za->open($tmp) !== true) { echo json_encode(['ok'=>false,'msg'=>'解压失败']); return; }
-    $extract_dir = sys_get_temp_dir() . '/jasmin_update_' . uniqid();
-    if (!is_dir($extract_dir) && !mkdir($extract_dir, 0700, true)) {
+    $extract_dir = get_temp_dir() . '/jasmin_update_' . uniqid();
+    if (!is_dir($extract_dir) && !make_directory($extract_dir, 0700, true)) {
         $za->close(); @unlink($tmp);
         echo json_encode(['ok'=>false,'msg'=>'无法创建临时目录']); return;
     }

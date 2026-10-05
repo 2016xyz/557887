@@ -38,14 +38,19 @@ function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8')
 $csrf = csrf_token();
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Jasmin C2</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 <link rel="stylesheet" href="./assets/css/dashboard.css">
+<link rel="stylesheet" href="./assets/css/toast.css">
+<link rel="stylesheet" href="./assets/css/responsive.css">
 </head>
 <body>
+<!-- 移动端汉堡菜单 + 侧边栏遮罩 -->
+<button class="hamburger" id="ham" onclick="toggleSidebar()" aria-label="菜单"><i class="fas fa-bars"></i></button>
+<div class="sidebar-overlay" onclick="toggleSidebar()"></div>
 <nav class="sidebar" id="sidebar">
   <div class="sidebar-head"><i class="fas fa-skull-crossbones"></i><span>JASMIN</span></div>
   <a href="dashboard.php" class="nav-item active"><i class="fas fa-chart-pie"></i><span>仪表盘</span></a>
@@ -638,6 +643,26 @@ function submitPassword(){
   document.body.appendChild(bar);
   setTimeout(function(){ location.reload(); }, 10000);
 })();
+
+// ── 移动端侧边栏切换 ──
+function toggleSidebar(){
+  var sb = document.getElementById('sidebar');
+  var ov = document.querySelector('.sidebar-overlay');
+  if(!sb) return;
+  var open = sb.classList.toggle('open');
+  if(ov) ov.style.display = open ? 'block' : 'none';
+}
+// 点击导航项后自动收起（移动端）
+document.querySelectorAll('.sidebar .nav-item').forEach(function(el){
+  el.addEventListener('click', function(){
+    if(window.innerWidth <= 768) toggleSidebar();
+  });
+});
+</script>
+<script src="./assets/js/toast.js"></script>
+<script>
+// 页面级提示封装：有 toast 组件则用之，否则回退 alert
+function notify(msg, type){ if(window.toast){ toast.show(msg, type||'info'); } else { alert(msg); } }
 </script>
 </body>
 </html>

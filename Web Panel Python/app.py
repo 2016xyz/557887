@@ -1,6 +1,49 @@
 #!/usr/bin/env python3
 """Jasmin C2 — Python Flask Backend with MySQL + Web Install Wizard"""
-import os, re, secrets, json, datetime, hashlib, time, fcntl, shutil
+import os, re, secrets, json, datetime, hashlib, time, shutil, sys, platform
+
+# ── 跨平台文件锁 ──
+# fcntl 仅存在于 Unix；Windows 无此模块，直接 import 会让整个应用启动即崩溃。
+# Windows 用 msvcrt.locking 提供等价的互斥锁。
+_IS_WINDOWS = platform.system() == 'Windows'
+if _IS_WINDOWS:
+    import msvcrt
+else:
+    import fcntl
+
+def _flock_ex(fh):
+    """获取排他锁（跨平台）"""
+    try:
+        if _IS_WINDOWS:
+            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+    except Exception:
+        pass
+
+def _flock_sh(fh):
+    """获取共享锁（跨平台）"""
+    try:
+        if _IS_WINDOWS:
+            msvcrt.locking(fh.fileno(), msvcrt.LK_RLCK, 1)
+        else:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_SH)
+    except Exception:
+        pass
+
+def _flock_un(fh):
+    """释放锁（跨平台）"""
+    try:
+        if _IS_WINDOWS:
+            try:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            except Exception:
+                pass
+        else:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        pass
 from urllib.parse import quote_plus
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, send_file, flash, Response
@@ -59,7 +102,7 @@ def _rl_path(key):
 def _rl_read(path, now, window):
     try:
         with open(path, 'r') as fh:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_SH)
+            _flock_sh(fh)
             data = json.load(fh) or []
     except Exception:
         return []
@@ -77,7 +120,7 @@ def _rl_hit(key, limit=10, window=300):
     path = _rl_path(key)
     try:
         fh = open(path, 'a+')
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        _flock_ex(fh)
         fh.seek(0)
         try:
             data = json.load(fh) or []
@@ -87,7 +130,7 @@ def _rl_hit(key, limit=10, window=300):
         data.append(now)
         fh.seek(0); fh.truncate()
         json.dump(data, fh); fh.flush()
-        fcntl.flock(fh.fileno(), fcntl.LOCK_UN); fh.close()
+        _flock_un(fh); fh.close()
         return (len(data) >= limit, len(data))
     except Exception:
         return (False, 0)

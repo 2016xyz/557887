@@ -6,6 +6,7 @@
 // 第 113 行 require db_conection.php 时才被间接加载 —— 那会让整个安装流程
 // 一进 POST 就 "Call to undefined function post_str()" 直接致命错误。
 require_once __DIR__ . '/includes/input.php';
+require_once __DIR__ . '/includes/platform.php';  // 跨平台支持
 session_start();
 
 // 如果已安装，跳转登录
@@ -91,7 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                  . "DB_PASS=" . $clean($pass) . "\n"
                  . "HANDSHAKE_SECRET=" . $clean($secret) . "\n";
             file_put_contents(__DIR__ . '/.env', $env);
-            @chmod(__DIR__ . '/.env', 0640);
+            set_file_permissions(__DIR__ . '/.env', 0640);
             $_SESSION['install_db_ok'] = true;
             header('Location: install.php?step=3');
             exit;
@@ -128,7 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = $pdo->prepare('INSERT INTO master (admin, creds) VALUES (:u, :p)');
                 $stmt->execute([':u' => $admin_user, ':p' => $hash]);
                 file_put_contents(__DIR__ . '/.installed', date('Y-m-d H:i:s'));
-                @chmod(__DIR__ . '/.installed', 0644);
+                set_file_permissions(__DIR__ . '/.installed', 0644);
                 // ★ 同时写 .pw_changed（写在共享卷 payloads/ 内）：
                 // 否则 Docker entrypoint 每次启动都会重跑 setup.php 用 ADMIN_PASSWORD
                 // (未设置=admin123) 把向导刚设的强口令覆盖掉。change_password.php 早就在写它。

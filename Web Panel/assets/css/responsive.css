@@ -1,0 +1,227 @@
+/* 响应式布局增强 */
+
+/* 平板适配 */
+@media (max-width: 1024px) {
+    .sidebar {
+        width: 220px;
+    }
+    
+    .content {
+        width: calc(100% - 220px);
+    }
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+    /* 侧边栏折叠 */
+    .sidebar {
+        transform: translateX(-100%);
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100vh;
+        width: 280px;
+        z-index: 1000;
+        transition: transform 0.3s ease;
+        box-shadow: 2px 0 10px rgba(0,0,0,0.3);
+    }
+    
+    .sidebar.open {
+        transform: translateX(0);
+    }
+    
+    /* 遮罩层 */
+    .sidebar-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 999;
+    }
+    
+    .sidebar.open ~ .sidebar-overlay,
+    body.sidebar-open .sidebar-overlay {
+        display: block;
+    }
+    
+    /* 内容区全宽 */
+    .content {
+        width: 100% !important;
+        margin-left: 0 !important;
+        padding: 60px 15px 20px;
+    }
+    
+    /* 汉堡菜单 */
+    .hamburger {
+        display: flex !important;
+        position: fixed;
+        top: 15px;
+        left: 15px;
+        z-index: 1001;
+        background: var(--bg-secondary, #1e293b);
+        border: none;
+        color: var(--text-primary, #e2e8f0);
+        width: 44px;
+        height: 44px;
+        border-radius: 8px;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+        cursor: pointer;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    
+    .hamburger:hover {
+        background: var(--accent, #4dc3fa);
+    }
+    
+    /* 表格水平滚动 */
+    .table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 -15px;
+        padding: 0 15px;
+    }
+    
+    table {
+        font-size: 0.85rem;
+        min-width: 800px;
+    }
+    
+    table th,
+    table td {
+        padding: 8px 6px;
+        white-space: nowrap;
+    }
+    
+    /* 统计卡片堆叠 */
+    .stats-row {
+        flex-direction: column !important;
+        gap: 12px;
+    }
+    
+    .stat-card {
+        width: 100% !important;
+    }
+    
+    /* 按钮组堆叠 */
+    .btn-group {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .btn-group button,
+    .btn-group a {
+        width: 100%;
+    }
+}
+
+/* 极小屏幕优化 */
+@media (max-width: 480px) {
+    h2 {
+        font-size: 1.2rem;
+    }
+    
+    button,
+    .btn {
+        font-size: 0.85rem;
+        padding: 10px 16px;
+        min-height: 44px; /* iOS推荐最小触控尺寸 */
+    }
+    
+    /* 表单字段 */
+    .field label {
+        font-size: 0.8rem;
+    }
+    
+    .field input,
+    .field select,
+    .field textarea {
+        font-size: 0.9rem;
+    }
+    
+    /* 简化表格：只显示关键列 */
+    table.mobile-simplified th:not(:first-child):not(:last-child),
+    table.mobile-simplified td:not(:first-child):not(:last-child) {
+        display: none;
+    }
+}
+
+/* 横屏优化 */
+@media (max-height: 600px) and (orientation: landscape) {
+    .content {
+        padding-top: 70px;
+    }
+    
+    .sidebar-head {
+        padding: 12px;
+    }
+}
+
+/* 触摸设备优化 */
+@media (hover: none) and (pointer: coarse) {
+    /* 增大可点击区域 */
+    .nav-item,
+    button,
+    .btn,
+    a {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+    }
+    
+    /* 移除hover效果（触摸设备无hover） */
+    .nav-item:hover,
+    button:hover,
+    .btn:hover {
+        /* 保持点击效果 */
+    }
+}
+
+/* 打印样式 */
+@media print {
+    .sidebar,
+    .hamburger,
+    button,
+    .btn,
+    .toast-container {
+        display: none !important;
+    }
+    
+    .content {
+        width: 100% !important;
+        margin: 0 !important;
+    }
+    
+    table {
+        font-size: 0.75rem;
+    }
+}
+
+/* 暗色模式变量（已定义则保持，未定义则使用默认值） */
+:root {
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-tertiary: #334155;
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --accent: #4dc3fa;
+    --accent2: #f59e0b;
+    --success: #10b981;
+    --danger: #ef4444;
+    --warning: #f59e0b;
+    --border: #334155;
+}
+
+/* 亮色模式支持（可选） */
+[data-theme="light"] {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8fafc;
+    --bg-tertiary: #e2e8f0;
+    --text-primary: #0f172a;
+    --text-secondary: #64748b;
+    --border: #e2e8f0;
+}
