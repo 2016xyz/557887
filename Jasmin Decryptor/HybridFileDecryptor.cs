@@ -64,8 +64,12 @@ namespace Jasmin_Decryptor
                     ? path.Substring(0, path.Length - 7)
                     : path + ".dec";
 
-                File.WriteAllBytes(outPath, plain);
-                File.Delete(path);
+                // 受保护目录（SYSTEM 持有、ACL 只给管理员只读）写不进去 ->
+                // 先 takeown/icacls 修 ACL 再重试。旧实现用 File.WriteAllBytes 直接写，
+                // 整个方法又被 catch{return null;} 包住 —— 权限失败会被【静默】吞掉，
+                // 界面上只表现为"这个文件没解密"，看不出原因。
+                if (!CryptoHelper.WriteWithAclRepair(outPath, plain)) return null;
+                try { File.Delete(path); } catch { }   // 明文已恢复，删不掉密文副本不算失败
                 return outPath;
             }
             catch { return null; }

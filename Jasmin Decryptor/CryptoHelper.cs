@@ -154,6 +154,63 @@ namespace Jasmin_Decryptor
             return ps;
         }
 
+        // ── 受保护目录写入（Windows） ────────────────────────────────────
+        // C:\ProgramData\Microsoft\Diagnosis\* 之类目录由 SYSTEM 持有、ACL 只给
+        // Administrators 只读。加密端以 SYSTEM 运行能写，以 Administrator 解密就报
+        //   "Access to the path '...' is denied."
+        // 对策：写失败时 takeown + icacls 拿回所有权/写权限后重试。
+        public static bool WriteWithAclRepair(string path, byte[] bytes)
+        {
+            try { File.WriteAllBytes(path, bytes); return true; }
+            catch (UnauthorizedAccessException) { }
+            catch (IOException) { }
+
+            // 只读属性不是 ACL 问题，先清掉
+            try
+            {
+                if (File.Exists(path))
+                {
+                    FileAttributes at = File.GetAttributes(path);
+                    if ((at & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
+                        File.SetAttributes(path, at & ~FileAttributes.ReadOnly);
+                }
+            }
+            catch { }
+
+            string obj = path;
+            if (!File.Exists(obj))
+            {
+                string dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir)) obj = dir;
+            }
+            // /a: 所有权归 Administrators；icacls 用著名 SID *S-1-5-32-544 而非
+            // 本地化组名。只改这一个对象，不递归。
+            Run("takeown.exe", "/f \"" + obj + "\" /a");
+            Run("icacls.exe", "\"" + obj + "\" /grant *S-1-5-32-544:F");
+
+            try { File.WriteAllBytes(path, bytes); return true; }
+            catch { return false; }
+        }
+
+        private static void Run(string exe, string args)
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo(exe, args);
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
+                psi.RedirectStandardOutput = true;
+                psi.RedirectStandardError = true;
+                using (var pr = System.Diagnostics.Process.Start(psi))
+                {
+                    pr.StandardOutput.ReadToEnd();
+                    pr.StandardError.ReadToEnd();
+                    pr.WaitForExit(15000);
+                }
+            }
+            catch { }   // takeown/icacls 缺失或权限不足 -> 交给调用方的返回 false
+        }
+
         public static byte[] RsaDecrypt(byte[] data, string privateKeyPem)
         {
             RSAParameters ps = ParseRsaPrivateKeyPem(privateKeyPem);

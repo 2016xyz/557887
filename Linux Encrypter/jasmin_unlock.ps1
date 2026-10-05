@@ -163,6 +163,69 @@ function ConvertFrom-JasminRsaPrivatePem {
     return $ps
 }
 
+# ── 受保护目录下的写入失败（Windows） ────────────────────────────────
+# 现象：C:\ProgramData\Microsoft\Diagnosis\DownloadedSettings\ 之类目录由 SYSTEM
+#   持有、ACL 只给 Administrators 只读(RX)。加密端以 SYSTEM 运行 -> 写得进去；
+#   手工以 Administrator 解密 -> 报：
+#     Exception calling "WriteAllBytes" with "2" argument(s):
+#     "Access to the path 'C:\...\telemetry.ASM-WindowsDefault.json' is denied."
+#   该目录 ACL 不允许 Administrators 在其中新建文件，所以必须先把所有权拿回来、
+#   再把写权限授给自己，然后重试。
+function Test-IsElevated {
+    try {
+        $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $pr = New-Object Security.Principal.WindowsPrincipal($id)
+        return $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch { return $false }   # 非 Windows 上 WindowsIdentity 不可用
+}
+
+function Repair-PathAcl {
+    # 目标文件【已存在】-> 修文件本身；否则 -> 修它所在目录（"能否新建"取决于目录 ACL）
+    param([string]$TargetPath)
+    $obj = $TargetPath
+    if (-not (Test-Path -LiteralPath $obj)) {
+        $d = [IO.Path]::GetDirectoryName($TargetPath)
+        if ($d -and (Test-Path -LiteralPath $d)) { $obj = $d }
+    }
+    $notes = @()
+    # /a：所有权归 Administrators 组（不依赖当前用户名、不依赖系统语言）
+    try { & takeown.exe /f "$obj" /a 2>$null | Out-Null; $notes += "takeown=$LASTEXITCODE" }
+    catch { $notes += "takeown-missing" }
+    # 用著名 SID *S-1-5-32-544(Administrators) 而非本地化组名，非英文 Windows 上
+    # 组名不可直译。只改这一个对象，【不递归】—— 避免动整个 ProgramData 树。
+    try { & icacls.exe "$obj" /grant '*S-1-5-32-544:F' 2>$null | Out-Null; $notes += "icacls=$LASTEXITCODE" }
+    catch { $notes += "icacls-missing" }
+    return ($notes -join ',')
+}
+
+function Write-RestoredFile {
+    param([string]$Path, [byte[]]$Bytes)
+    # 旧版本可能留下只读属性；只读不是 ACL 问题，先清掉再试
+    try {
+        if (Test-Path -LiteralPath $Path) {
+            $at = [IO.File]::GetAttributes($Path)
+            if ($at -band [IO.FileAttributes]::ReadOnly) {
+                [IO.File]::SetAttributes($Path, ($at -bxor [IO.FileAttributes]::ReadOnly))
+            }
+        }
+    } catch { }
+    try {
+        [IO.File]::WriteAllBytes($Path, $Bytes)
+        return @{ ok = $true; note = '' }
+    } catch { $first = $_.Exception.Message }
+
+    if (-not (Test-IsElevated)) {
+        return @{ ok = $false; note = "write denied and this session is NOT elevated - rerun as Administrator. original: $first" }
+    }
+    $rep = Repair-PathAcl -TargetPath $Path
+    try {
+        [IO.File]::WriteAllBytes($Path, $Bytes)
+        return @{ ok = $true; note = "write denied -> ACL repaired ($rep) -> retry OK" }
+    } catch {
+        return @{ ok = $false; note = "write STILL denied after ACL repair ($rep): $($_.Exception.Message) | original: $first" }
+    }
+}
+
 # ── 遍历器：只走真实目录，不穿 junction/符号链接 ──
 #   C:\Documents and Settings、C:\Users\All Users 之类都是指回真实目录的 junction。
 #   Get-ChildItem -Recurse 会跟着它们绕圈并重复枚举同一批文件 —— 实测同一台机器
@@ -196,6 +259,31 @@ $K = ($K -replace '\s', '')
 if ($K.Length -ne 32) {
     Write-Host "[!] K passphrase should be 32 hex chars, got $($K.Length)" -ForegroundColor Red
     exit 1
+}
+
+# ── 提权自举 ───────────────────────────────────────────────────────────
+# 受保护目录（SYSTEM 持有的 ProgramData 子树等）里恢复文件需要先 takeown/icacls，
+# 而这要求管理员权限。非管理员运行时自动以 RunAs 重启一次；UAC 被拒则继续，
+# 并在真正遇到写入拒绝时把原因明确报出来（不再只给一句干巴巴的 "is denied"）。
+# JASMIN_UNLOCK_ELEVATED 防止子进程因权限判定异常而无限自我重启。
+if (-not (Test-IsElevated) -and $env:JASMIN_UNLOCK_ELEVATED -ne '1' -and $PSCommandPath) {
+    Write-Host "[*] Not elevated - relaunching as Administrator (a UAC prompt may appear)..." -ForegroundColor Yellow
+    try {
+        $q = { param($v) if ($v -match '[\s"]') { '"' + ($v -replace '"', '\"') + '"' } else { $v } }
+        $psExe  = (Get-Process -Id $PID).Path
+        $argList = @('-NoProfile','-ExecutionPolicy','Bypass','-File', (& $q $PSCommandPath),
+                     '-Server', (& $q $Server), '-K', (& $q $K))
+        if ($Paths -and $Paths.Count -gt 0) {
+            $argList += '-Paths'
+            foreach ($x in $Paths) { $argList += (& $q $x) }
+        }
+        $env:JASMIN_UNLOCK_ELEVATED = '1'
+        $proc = Start-Process -FilePath $psExe -ArgumentList $argList -Verb RunAs -PassThru -Wait
+        exit $proc.ExitCode
+    } catch {
+        Write-Host "[!] Elevation failed or was declined: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "    Continuing unelevated - files in SYSTEM-protected folders will fail." -ForegroundColor Yellow
+    }
 }
 
 if (-not $Paths -or $Paths.Count -eq 0) {
@@ -329,8 +417,15 @@ try {
                     throw "SHA256 verification failed (file tampered or wrong private key)"
                 }
 
-                [IO.File]::WriteAllBytes(($f -replace '\.jasmin$', ''), $plain)
-                Remove-Item -LiteralPath $f -Force
+                # 写入走 Write-RestoredFile：写失败先拿所有权+授权再重试（受保护目录）。
+                # ★ 写不成功就【抛错】跳过 Remove-Item —— 明文没落地就绝不删密文。
+                $target = $f -replace '\.jasmin$', ''
+                $wr = Write-RestoredFile -Path $target -Bytes $plain
+                if (-not $wr.ok) { throw $wr.note }
+                if ($wr.note) { Write-Host "    [i] $($wr.note)" }
+                # 删除失败不算解密失败：明文已恢复，只是密文副本清理不掉（如目录 ACL 只许 SYSTEM 删）
+                try { Remove-Item -LiteralPath $f -Force }
+                catch { Write-Host "    [i] restored, but could not remove the encrypted copy: $($_.Exception.Message)" }
                 Write-Host "[+] $f"
                 $ok++
             }
