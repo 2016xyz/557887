@@ -23,8 +23,14 @@
 #                                                not valid for this algorithm"
 #     [SHA256]::HashData($plain)                 .NET 5+ 静态方法
 #   三重叠加的结果是：默认 Windows 上解密器一行都跑不动，只有装了 PS7 才行。
-#   本版改为：自解析 PKCS#1 私钥 DER → RSACng（Framework 4.6+ 即有，支持
-#   OAEP-SHA256）→ SHA256.Create().ComputeHash()。已在该虚拟机
+#   本版改为：自解析私钥 DER → RSACng（Framework 4.6+ 即有，支持
+#   OAEP-SHA256）→ SHA256.Create().ComputeHash()。
+#   ★ 解析器须同时支持两种私钥容器（两个面板导出的格式不同）：
+#       PKCS#1 "BEGIN RSA PRIVATE KEY"  ← Python 面板 (TraditionalOpenSSL)
+#       PKCS#8 "BEGIN PRIVATE KEY"      ← PHP 面板 (openssl_pkey_export)
+#     旧版只认 PKCS#1，遇到 PHP 面板下发的 PKCS#8 会抛
+#       "DER: tag mismatch, got 0x30 want 0x02"
+#     导致解密器完全不可用。已在该虚拟机
 #   (Server 2019 / PS 5.1.17763) 上对 2700+ 真实加密文件实测通过。
 # ════════════════════════════════════════════════════════════════
 #Requires -Version 5.1
@@ -38,7 +44,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $Server = $Server.TrimEnd('/')
 
-# ── DER (ASN.1) 最小解析器：用于把 PKCS#1 私钥 PEM 转成 RSAParameters ──
+# ── DER (ASN.1) 最小解析器：把私钥 PEM（PKCS#1 或 PKCS#8）转成 RSAParameters ──
 function Get-DerValue {
     param([byte[]]$Data, [ref]$Pos, [int]$Want)
     $p = $Pos.Value
@@ -82,9 +88,50 @@ function ConvertFrom-JasminRsaPrivatePem {
     $der = [Convert]::FromBase64String($b64)
 
     $off = 0
-    # PKCS#1: RSAPrivateKey ::= SEQUENCE { version, n, e, d, p, q, dp, dq, qInv }
-    # （服务器 keygen 用 openssl_pkey_export，导出的是 "BEGIN RSA PRIVATE KEY"）
-    $seq = Get-DerValue -Data $der -Pos ([ref]$off) -Want 0x30
+    # 外层容器的 DER 结构（两者都是 SEQUENCE 起步，但内部不同）：
+    #   · PKCS#1  "BEGIN RSA PRIVATE KEY"   ← Python 面板(app.py, PrivateFormat.TraditionalOpenSSL)
+    #     RSAPrivateKey  ::= SEQUENCE { version INTEGER, n INTEGER, e INTEGER, ... }
+    #   · PKCS#8  "BEGIN PRIVATE KEY"       ← PHP 面板(keygen.php, openssl_pkey_export)
+    #     PrivateKeyInfo ::= SEQUENCE { version INTEGER,
+    #                                   AlgorithmIdentifier SEQUENCE,
+    #                                   privateKey OCTET STRING(内层 = RSAPrivateKey) }
+    # ★ 旧实现假定永远只有 PKCS#1，读到的外层 SEQUENCE 里第二个元素就硬要 INTEGER
+    #   —— 一旦服务器下发 PKCS#8（PHP 面板就是），第二个元素是 AlgorithmIdentifier
+    #   的 SEQUENCE(0x30)，于是 Get-DerValue 抛
+    #     "DER: tag mismatch, got 0x30 want 0x02"
+    #   整条解密链在此断掉。
+    #   判别方式：跳过 version INTEGER 后看下一个 TLV 的 tag
+    #     0x02 → PKCS#1（紧随 modulus INTEGER）
+    #     0x30 → PKCS#8（紧随 AlgorithmIdentifier SEQUENCE）
+    #   只认 DER 结构、不认 PEM 头文字（头可能被换行/空格/编辑器破坏，且 BOM 会污染）。
+    $outer = Get-DerValue -Data $der -Pos ([ref]$off) -Want 0x30
+    $probe = 0
+    [void](Get-DerValue -Data $outer -Pos ([ref]$probe) -Want 0x02)     # version INTEGER
+    if ($probe -ge $outer.Length) { throw 'DER: truncated after version - not a valid RSA private key' }
+    $nextTag = $outer[$probe]
+
+    $seq = $outer
+    if ($nextTag -eq 0x30) {
+        # ── PKCS#8：解开 PrivateKeyInfo 取内层 RSAPrivateKey ──
+        # 注意内层第一个元素也可能是 SEQUENCE(0x30) —— 那是 EncryptedPrivateKeyInfo
+        # （加密的 PKCS#8），需要用口令解密后才是明文私钥，本脚本不支持，明确报错。
+        $q = 0
+        [void](Get-DerValue -Data $outer -Pos ([ref]$q) -Want 0x02)     # version INTEGER
+        [void](Get-DerValue -Data $outer -Pos ([ref]$q) -Want 0x30)     # AlgorithmIdentifier
+        $pk = Get-DerValue -Data $outer -Pos ([ref]$q) -Want 0x04       # privateKey OCTET STRING
+        $r = 0
+        $seq = Get-DerValue -Data $pk -Pos ([ref]$r) -Want 0x30         # 内层 RSAPrivateKey SEQUENCE
+        # 区分「明文 PKCS#8」与「加密 PKCS#8(EncryptedPrivateKeyInfo)」：
+        #   明文内层 RSAPrivateKey 以 INTEGER version(0x02) 开头；
+        #   加密内层 EncryptedPrivateKeyInfo 以 AlgorithmsIdentifier SEQUENCE(0x30) 开头。
+        if ($seq.Length -gt 0 -and $seq[0] -eq 0x30) {
+            throw 'DER: this looks like an EncryptedPrivateKeyInfo (encrypted PKCS#8). Expected the decrypted plaintext private key PEM.'
+        }
+    }
+    elseif ($nextTag -ne 0x02) {
+        throw ('DER: unexpected tag 0x{0:X2} after version - not PKCS#1 (0x02) nor PKCS#8 (0x30)' -f $nextTag)
+    }
+
     $p = 0
     [void](Get-DerValue -Data $seq -Pos ([ref]$p) -Want 0x02)   # version
     $n  = Get-DerValue -Data $seq -Pos ([ref]$p) -Want 0x02     # modulus
