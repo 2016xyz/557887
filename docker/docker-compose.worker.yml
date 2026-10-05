@@ -13,7 +13,7 @@
 #   DB_PASS=jasmin_secure_pw
 #   REDIS_HOST=10.0.1.100
 #   REDIS_PORT=6379
-#   HANDSHAKE_SECRET=jasmin@123
+#   HANDSHAKE_SECRET=<用 openssl rand -hex 24 生成>
 
 services:
   # ── Nginx 负载均衡 ──
@@ -46,7 +46,7 @@ services:
       DB_USER: ${DB_USER:-jasminadmin}
       DB_PASS: ${DB_PASS:?请设置DB_PASS}
       TRUST_PROXY: "1"
-      HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
+      HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-}
       REDIS_HOST: ${REDIS_HOST:-}
       REDIS_PORT: ${REDIS_PORT:-6379}
     deploy:
@@ -67,7 +67,7 @@ services:
       DB_NAME: ${DB_NAME:-jasmin_db}
       DB_USER: ${DB_USER:-jasminadmin}
       DB_PASS: ${DB_PASS:?请设置DB_PASS}
-      HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
+      HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-}
       SECRET_KEY: ${SECRET_KEY:-}
       TRUST_PROXY: "1"
       REDIS_HOST: ${REDIS_HOST:-}

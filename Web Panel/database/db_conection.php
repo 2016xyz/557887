@@ -1,31 +1,28 @@
 <?php
 require_once __DIR__ . '/../includes/input.php';
+require_once __DIR__ . '/../includes/env.php';   // 统一 .env 加载（不再在此重复定义 loadEnv）
 /**
  * 数据库连接 - 使用PDO预处理防SQL注入
  * 凭据从 .env 文件读取，不再硬编码
  */
 
-// 解析 .env 文件
-function loadEnv(string $path): void {
-    if (!file_exists($path)) {
-        die('Missing .env configuration file.');
-    }
-    foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
-        $line = trim($line);
-        if ($line === '' || $line[0] === '#') continue;
-        if (strpos($line, '=') === false) continue;
-        [$key, $value] = explode('=', $line, 2);
-        $_ENV[trim($key)] = trim($value);
-    }
+// 引入 includes/env.php 时已自动解析 .env；此处仅校验必需文件存在
+if (!is_file(env_path())) {
+    die('Missing .env configuration file.');
 }
 
-loadEnv(__DIR__ . '/../.env');
+// 不保留弱默认值：未显式配置就报错，避免部署出「默认口令」实例
+$db_host = env_get('DB_HOST');
+$db_port = env_get('DB_PORT', '3306');
+$db_name = env_get('DB_NAME');
+$db_user = env_get('DB_USER');
+$db_pass = env_get('DB_PASS');
 
-$db_host = $_ENV['DB_HOST'] ?? 'localhost';
-$db_port = $_ENV['DB_PORT'] ?? '3306';
-$db_name = $_ENV['DB_NAME'] ?? 'jasmin_db';
-$db_user = $_ENV['DB_USER'] ?? 'jasminadmin';
-$db_pass = $_ENV['DB_PASS'] ?? '';
+if ($db_host === '' || $db_name === '' || $db_user === '') {
+    error_log('[jasmin] DB 配置不完整（.env 缺少 DB_HOST/DB_NAME/DB_USER）');
+    http_response_code(500);
+    die('Database is not configured.');
+}
 
 try {
     $pdo = new PDO(

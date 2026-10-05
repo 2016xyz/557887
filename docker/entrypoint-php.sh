@@ -1,6 +1,32 @@
 #!/bin/bash
 # Auto-create .env from Docker environment
 ENV_FILE=/var/www/html/.env
+
+# ── 握手密钥：绝不使用硬编码默认值 ──────────────────────────────────
+# 原实现是 HANDSHAKE_SECRET=${HANDSHAKE_SECRET:-jasmin@123}，把源码里公开的
+# 'jasmin@123' 注入 .env。这恰好【绕过】了 handshake.php 的「密钥为空则拒绝服务」
+# 保护 —— 因为该值非空，于是默认部署下任何人都能用公开密钥伪造受害者上报。
+# 现改为：未显式设置时 → 生成随机密钥 → 持久化到共享卷（重启不变）→ 明确告警。
+SECRET_FILE=/var/www/html/payloads/.handshake_secret
+if [ -f "$SECRET_FILE" ] && [ -s "$SECRET_FILE" ]; then
+  _PERSISTED_SECRET=$(cat "$SECRET_FILE")
+fi
+if [ -z "${HANDSHAKE_SECRET:-}" ]; then
+  if [ -n "${_PERSISTED_SECRET:-}" ]; then
+    HANDSHAKE_SECRET="$_PERSISTED_SECRET"
+    echo "[entrypoint] HANDSHAKE_SECRET 未设置，沿用共享卷中已持久化的密钥"
+  else
+    HANDSHAKE_SECRET=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    mkdir -p "$(dirname "$SECRET_FILE")"
+    printf '%s' "$HANDSHAKE_SECRET" > "$SECRET_FILE"
+    chmod 0640 "$SECRET_FILE" 2>/dev/null || true
+    chown www-data:www-data "$SECRET_FILE" 2>/dev/null || true
+    echo "[entrypoint] !! HANDSHAKE_SECRET 未设置 —— 已生成随机密钥并持久化到 payloads/.handshake_secret"
+    echo "[entrypoint] !! 如需固定该值，请在 compose / .env 中显式设置 HANDSHAKE_SECRET"
+  fi
+fi
+export HANDSHAKE_SECRET
+
 if [ ! -f "$ENV_FILE" ]; then
 cat > "$ENV_FILE" << EOF
 DB_HOST=${DB_HOST:-db}
@@ -8,7 +34,7 @@ DB_PORT=${DB_PORT:-3306}
 DB_NAME=${DB_NAME:-jasmin_db}
 DB_USER=${DB_USER:-jasminadmin}
 DB_PASS=${DB_PASS:-jasmin_secure_pw}
-HANDSHAKE_SECRET=${HANDSHAKE_SECRET:-jasmin@123}
+HANDSHAKE_SECRET=${HANDSHAKE_SECRET}
 EOF
 chown www-data:www-data "$ENV_FILE"
 echo "[entrypoint] .env created"

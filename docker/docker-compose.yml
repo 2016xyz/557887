@@ -43,7 +43,7 @@ services:
       DB_NAME: jasmin_db
       DB_USER: jasminadmin
       DB_PASS: ${MYSQL_PASSWORD:-jasmin_secure_pw}
-      HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
+      HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-}
     ports:
       - "8080:80"
 
@@ -65,7 +65,7 @@ services:
       DB_NAME: jasmin_db
       DB_USER: jasminadmin
       DB_PASS: ${MYSQL_PASSWORD:-jasmin_secure_pw}
-      HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-jasmin@123}
+      HANDSHAKE_SECRET: ${HANDSHAKE_SECRET:-}
       # 多副本时若不提供同一 SECRET_KEY，各副本会各自随机生成 -> 会话签名互不兼容。
       # entrypoint 在未设置时从共享环境变量确定性派生，故此处留空亦可。
       SECRET_KEY: ${SECRET_KEY:-}

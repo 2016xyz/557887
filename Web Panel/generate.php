@@ -13,7 +13,10 @@ if (!csrf_verify()) { http_response_code(403); echo json_encode(['ok'=>false,'ms
 
 $platform = $_POST['platform'] ?? '';
 $c2_url   = trim((string)($_POST['c2_url'] ?? ''));
-$secret   = trim((string)($_POST['secret'] ?? 'jasmin@123'));
+// ★ 修复：原默认值 'jasmin@123' 是公开在源码里的硬编码密钥 —— 与服务器端默认一致，
+//   等于生成的载荷人手一份通用握手密钥。改为无默认值（空值会被下方白名单正则的
+//   {1,64} 拒绝并给出提示），强制操作者填写真实密钥。
+$secret   = trim((string)($_POST['secret'] ?? ''));
 
 // ── 入参白名单 ──
 // 这两个值会被直接替换进载荷模板（esxi 版是 sh 的 'SECRET=\'{{HANDSHAKE}}\''），

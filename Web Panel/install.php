@@ -30,7 +30,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name = trim(post_str('db_name', 'jasmin_db'));
         $user = trim(post_str('db_user'));
         $pass = post_str('db_pass');
-        $secret = trim(post_str('secret', 'jasmin@123'));
+        // ★ 修复：原为 post_str('secret', 'jasmin@123') —— 公开在源码里的硬编码密钥。
+        //   留空时改为【生成随机密钥】而不是回落到公开默认值，兼顾易用与安全。
+        $secret = trim(post_str('secret'));
+        if ($secret === '') {
+            $secret = bin2hex(random_bytes(16));
+        }
         // 主机/端口同样会拼进 DSN，且 .env 会被后续流程复用
         // 注意：这三处校验位于 try 块(第43行)之前，若用 throw 抛 RuntimeException
         // 将不被下方 catch 捕获，非法输入直接未捕获异常 -> HTTP 500 而非友好报错。
@@ -210,7 +215,7 @@ foreach($checks as $name=>$ok): ?>
 <div class="field"><label>数据库名</label><input name="db_name" value="jasmin_db" required></div>
 <div class="field"><label>用户名</label><input name="db_user" value="" required></div>
 <div class="field"><label>密码</label><input name="db_pass" type="password" value=""></div>
-<div class="field"><label>握手密钥</label><input name="secret" value="jasmin@123" required></div>
+<div class="field"><label>握手密钥</label><input name="secret" value="" placeholder="留空将自动生成随机密钥" required></div>
 <button type="submit" style="width:100%">测试连接并创建表 →</button>
 <?php endif;?>
 

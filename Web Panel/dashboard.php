@@ -215,7 +215,7 @@ $__kfiles = [
 
 <div class="gen-opts" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:20px">
   <div class="field"><label>回连地址 (C2)</label><input type="text" id="c2url" value="<?=h($server_url)?>/handshake.php"></div>
-  <div class="field"><label>握手密钥</label><input type="text" id="gensecret" value="jasmin@123"></div>
+  <div class="field"><label>握手密钥</label><input type="text" id="gensecret" value="<?=h(env_get('HANDSHAKE_SECRET'))?>" placeholder="与 .env 中 HANDSHAKE_SECRET 一致"></div>
   <div class="field"><label>目标系统</label>
     <select id="gen-platform" style="width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.85rem">
       <option value="win">🖥️ Windows (C# / .NET)</option>

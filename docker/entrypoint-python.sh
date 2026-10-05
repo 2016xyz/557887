@@ -1,6 +1,29 @@
 #!/bin/bash
 # Auto-create config.json from Docker environment
 CFG=/app/config.json
+
+# ── 握手密钥：与 PHP entrypoint 同一套逻辑，绝不使用硬编码默认值 ──
+# 原实现回落到源码里公开的 'jasmin@123'，等于默认部署人人持同一把通用密钥。
+# 现改为：未显式设置 → 生成随机密钥 → 持久化到共享卷 → 明确告警。
+SECRET_FILE=/app/payloads/.handshake_secret
+if [ -f "$SECRET_FILE" ] && [ -s "$SECRET_FILE" ]; then
+  _PERSISTED_SECRET=$(cat "$SECRET_FILE")
+fi
+if [ -z "${HANDSHAKE_SECRET:-}" ]; then
+  if [ -n "${_PERSISTED_SECRET:-}" ]; then
+    HANDSHAKE_SECRET="$_PERSISTED_SECRET"
+    echo "[entrypoint] HANDSHAKE_SECRET 未设置，沿用共享卷中已持久化的密钥"
+  else
+    HANDSHAKE_SECRET=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    mkdir -p "$(dirname "$SECRET_FILE")"
+    printf '%s' "$HANDSHAKE_SECRET" > "$SECRET_FILE"
+    chmod 0640 "$SECRET_FILE" 2>/dev/null || true
+    echo "[entrypoint] !! HANDSHAKE_SECRET 未设置 —— 已生成随机密钥并持久化到 payloads/.handshake_secret"
+    echo "[entrypoint] !! 如需固定该值，请在 compose / .env 中显式设置 HANDSHAKE_SECRET"
+  fi
+fi
+export HANDSHAKE_SECRET
+
 if [ ! -f "$CFG" ]; then
 python3 <<'PY'
 import json, os, secrets, hashlib
@@ -12,7 +35,7 @@ cfg = {
         quote_plus(u), quote_plus(p),
         os.environ.get('DB_HOST', 'db'), os.environ.get('DB_PORT', '3306'),
         os.environ.get('DB_NAME', 'jasmin_db')),
-    'handshake_secret': os.environ.get('HANDSHAKE_SECRET', 'jasmin@123'),
+    'handshake_secret': os.environ.get('HANDSHAKE_SECRET', ''),
     'installed': True,
     # SECRET_KEY 必须每个部署各自随机 —— 镜像里写死的密钥等于公开的会话签名密钥
     # ★ 多副本一致性：此前无条件 token_hex(32) 随机生成，而 config.json 不在任何

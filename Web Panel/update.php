@@ -4,6 +4,10 @@
  */
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/platform.php';  // 跨平台支持
+// ★ 修复：本文件会读取 GIT_TOKEN 访问【私有】仓库，但此前从未加载 .env
+//   （.env 解析函数原先只存在于 database/db_conection.php 内部，而本文件并未引用它），
+//   致使 GIT_TOKEN 恒为空 —— 私有部署下「检查更新」必然报"无法连接更新服务器"。
+require_once __DIR__ . '/includes/env.php';
 require_auth();
 header('Content-Type: application/json');
 
@@ -11,7 +15,7 @@ $vf = __DIR__ . '/../VERSION';
 if (!file_exists($vf)) $vf = __DIR__ . '/VERSION';
 define('CURRENT_VERSION', trim(@file_get_contents($vf) ?: '0.0.0'));
 define('REPO', '2016xyz/Jasmin-Ransomware-Private');
-define('GIT_TOKEN', trim(getenv('GIT_TOKEN') ?: ($_ENV['GIT_TOKEN'] ?? '')));
+define('GIT_TOKEN', env_get('GIT_TOKEN'));
 
 $action = $_GET['action'] ?? 'check';
 if ($action === 'check') {
